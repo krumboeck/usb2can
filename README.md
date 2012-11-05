@@ -1,6 +1,15 @@
 CAN driver for UAB "8 devices" USB2CAN converter
 ================================================
 
+Note
+----
+THIS SOFTWARE COMES WITHOUT ANY WARRANTY!
+
+
+License
+-------
+GPL v2
+
 
 How to build
 ------------
@@ -20,4 +29,3 @@ Shut down interface
 -------------------
     ip link set can0 down
     rmmod usb2can
-
