@@ -72,8 +72,9 @@
 #define USB2CAN_DATA_END	0xAA
 
 /* message flags */
-#define USB2CAN_RTR            0x02
 #define USB2CAN_EXTID          0x01
+#define USB2CAN_RTR            0x02
+#define USB2CAN_ERR_FLAG       0x04
 
 #define USB2CAN_SILENT         0x00000001
 #define USB2CAN_LOOPBACK       0x00000002
@@ -86,7 +87,7 @@
 
 /* status */
 #define USB2CAN_STATUSMSG_OK        0x00  /* Normal condition. */
-#define USB2CAN_STATUSMSG_OVERRUN   0x01  /* Overrun occured when sending data to CAN bus */
+#define USB2CAN_STATUSMSG_OVERRUN   0x01  /* Overrun occured when sending */
 #define USB2CAN_STATUSMSG_BUSLIGHT  0x02  /* Error counter has reached 96 */
 #define USB2CAN_STATUSMSG_BUSHEAVY  0x03  /* Error counter has reached 128 */
 #define USB2CAN_STATUSMSG_BUSOFF    0x04  /* Device is in BUSOFF */
@@ -193,7 +194,8 @@ static int usb2can_send_cmd_msg(struct usb2can *dev, u8 *msg, int size)
 			    1000);
 }
 
-static int usb2can_wait_cmd_msg(struct usb2can *dev, u8 *msg, int size, int *actual_length)
+static int usb2can_wait_cmd_msg(struct usb2can *dev, u8 *msg, int size,
+			        int *actual_length)
 {
 	return usb_bulk_msg(dev->udev,
 			    usb_rcvbulkpipe(dev->udev, 3),
@@ -203,7 +205,8 @@ static int usb2can_wait_cmd_msg(struct usb2can *dev, u8 *msg, int size, int *act
 			    1000);
 }
 
-static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out, struct usb2can_cmd_msg *in)
+static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
+			    struct usb2can_cmd_msg *in)
 {
 	int	err;
 	int	nBytesRead;
@@ -217,13 +220,15 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out, st
 	memcpy(&dev->cmd_msg_buffer[0], out,
 		sizeof(struct usb2can_cmd_msg));
 
-	err = usb2can_send_cmd_msg(dev, &dev->cmd_msg_buffer[0], sizeof(struct usb2can_cmd_msg));
+	err = usb2can_send_cmd_msg(dev, &dev->cmd_msg_buffer[0],
+				   sizeof(struct usb2can_cmd_msg));
 	if (err < 0) {
 		dev_err(netdev->dev.parent, "sending command message failed");
 		return err;
 	}
 
-	err = usb2can_wait_cmd_msg(dev, &dev->cmd_msg_buffer[0], sizeof(struct usb2can_cmd_msg), &nBytesRead);
+	err = usb2can_wait_cmd_msg(dev, &dev->cmd_msg_buffer[0],
+				   sizeof(struct usb2can_cmd_msg), &nBytesRead);
 	if (err < 0) {
 		dev_err(netdev->dev.parent, "no command message answer");
 		return err;
@@ -232,13 +237,15 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out, st
 	memcpy(in, &dev->cmd_msg_buffer[0],
 		sizeof(struct usb2can_cmd_msg));
 
-	if (in->begin != USB2CAN_CMD_START || in->end != USB2CAN_CMD_END || nBytesRead != 16 || in->opt1 != 0)
+	if (in->begin != USB2CAN_CMD_START || in->end != USB2CAN_CMD_END ||
+			nBytesRead != 16 || in->opt1 != 0)
 		return -EPROTO;
 
 	return 0;
 }
 
-static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2, u8 sjw, u16 brp, u32 ctrlmode)
+static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2,
+			    u8 sjw, u16 brp, u32 ctrlmode)
 {
 	struct usb2can_cmd_msg	outmsg;
 	struct usb2can_cmd_msg	inmsg;
@@ -313,7 +320,9 @@ static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 
 	switch (mode) {
 	case CAN_MODE_START:
-		err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1, bt->phase_seg2, bt->sjw, bt->brp, dev->can.ctrlmode);
+		err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
+				bt->phase_seg1, bt->phase_seg2,
+				bt->sjw, bt->brp, dev->can.ctrlmode);
 		if (err)
 			dev_warn(netdev->dev.parent, "couldn't start device");
 
@@ -338,7 +347,9 @@ static int usb2can_set_bittiming(struct net_device *netdev)
 	if (err)
 		dev_warn(netdev->dev.parent, "couldn't stop device");
 
-       	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1, bt->phase_seg2, bt->sjw, bt->brp, dev->can.ctrlmode);
+       	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
+			bt->phase_seg1, bt->phase_seg2,
+			bt->sjw, bt->brp, dev->can.ctrlmode);
 	if (err)
 		dev_warn(netdev->dev.parent, "couldn't start device");
 	return err;
@@ -402,7 +413,8 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 			for (i = 0; i < cf->can_dlc; i++)
 				cf->data[i] = msg->data[i];
 		}
-	} else if (msg->type == USB2CAN_TYPE_ERROR_FRAME) {
+	} else if (msg->type == USB2CAN_TYPE_ERROR_FRAME &&
+		   msg->flags == USB2CAN_ERR_FLAG) {
 		u8 state = msg->data[0];
 		u8 txerr = msg->data[2];
 		u8 rxerr = msg->data[3];
@@ -451,20 +463,23 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 			case USB2CAN_STATUSMSG_OVERRUN:
 				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
-					CAN_ERR_CRTL_TX_OVERFLOW : CAN_ERR_CRTL_RX_OVERFLOW;
+					CAN_ERR_CRTL_TX_OVERFLOW :
+					CAN_ERR_CRTL_RX_OVERFLOW;
 				cf->data[2] |= CAN_ERR_PROT_OVERLOAD;
 				stats->rx_over_errors++;
 				break;
 			case USB2CAN_STATUSMSG_BUSLIGHT:
 				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
-					CAN_ERR_CRTL_TX_WARNING : CAN_ERR_CRTL_RX_WARNING;
+					CAN_ERR_CRTL_TX_WARNING :
+					CAN_ERR_CRTL_RX_WARNING;
 				dev->can.can_stats.error_warning++;
 				break;
 			case USB2CAN_STATUSMSG_BUSHEAVY:
 				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
-					CAN_ERR_CRTL_TX_PASSIVE : CAN_ERR_CRTL_RX_PASSIVE;
+					CAN_ERR_CRTL_TX_PASSIVE :
+					CAN_ERR_CRTL_RX_PASSIVE;
 				dev->can.can_stats.error_passive++;
 				break;
 			default:
@@ -483,7 +498,8 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
                 cf->data[7] = rxerr;
 		
 	} else {
-		dev_warn(dev->udev->dev.parent, "frame type %d unknown", msg->type);
+		dev_warn(dev->udev->dev.parent, "frame type %d unknown",
+		         msg->type);
 	}
 
 	netif_rx(skb);
@@ -586,7 +602,8 @@ static void usb2can_write_bulk_callback(struct urb *urb)
 		netif_wake_queue(netdev);
 }
 
-static netdev_tx_t usb2can_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t usb2can_start_xmit(struct sk_buff *skb,
+				      struct net_device *netdev)
 {
 	struct usb2can *dev = netdev_priv(netdev);
 	struct net_device_stats *stats = &netdev->stats;
@@ -608,7 +625,8 @@ static netdev_tx_t usb2can_start_xmit(struct sk_buff *skb, struct net_device *ne
 		goto nomem;
 	}
 
-	buf = usb_alloc_coherent(dev->udev, size, GFP_ATOMIC, &urb->transfer_dma);
+	buf = usb_alloc_coherent(dev->udev, size, GFP_ATOMIC,
+				 &urb->transfer_dma);
 	if (!buf) {
 		dev_err(netdev->dev.parent, "No memory left for USB buffer");
 		usb_free_urb(urb);
@@ -652,7 +670,7 @@ static netdev_tx_t usb2can_start_xmit(struct sk_buff *skb, struct net_device *ne
 		usb_unanchor_urb(urb);
 		usb_free_coherent(dev->udev, size, buf, urb->transfer_dma);
 
-		dev_warn(netdev->dev.parent, "couldn't find free context\n");
+		dev_warn(netdev->dev.parent, "couldn't find free context");
 
 		return NETDEV_TX_BUSY;
 	}
@@ -792,7 +810,9 @@ static int usb2can_start(struct usb2can *dev)
 		return err;
 	}
 
-	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1, bt->phase_seg2, bt->sjw, bt->brp, dev->can.ctrlmode);
+	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1,
+			       bt->phase_seg2, bt->sjw, bt->brp,
+			       dev->can.ctrlmode);
 	if (err)
 		goto failed;
 
@@ -897,7 +917,8 @@ static struct can_bittiming_const usb2can_bittiming_const = {
 	.brp_inc = USB2CAN_BRP_INC,
 };
 
-static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id *id)
+static int usb2can_probe(struct usb_interface *intf,
+			 const struct usb_device_id *id)
 {
 	struct net_device *netdev;
 	struct usb2can *dev;
@@ -907,8 +928,8 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
         struct usb_device *usbdev = interface_to_usbdev(intf);
 
         /* product id looks strange, better we also check iProdukt string */
-        if (usb_string(usbdev, usbdev->descriptor.iProduct, buf, sizeof(buf)) > 0
-            && strcmp(buf, "USB2CAN converter")) {
+        if (usb_string(usbdev, usbdev->descriptor.iProduct, buf,
+		       sizeof(buf)) > 0 && strcmp(buf, "USB2CAN converter")) {
                 dev_info(&usbdev->dev, "ignoring: not an USB2CAN converter");
                 return -ENODEV;
         }
@@ -930,7 +951,8 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
 	dev->can.bittiming_const = &usb2can_bittiming_const;
 	dev->can.do_set_bittiming = usb2can_set_bittiming;
 	dev->can.do_set_mode = usb2can_set_mode;
-	dev->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK | CAN_CTRLMODE_LISTENONLY;
+	dev->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
+				      CAN_CTRLMODE_LISTENONLY;
 
 	netdev->netdev_ops = &usb2can_netdev_ops;
 
@@ -956,7 +978,8 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
 		goto cleanup_intr_urb;
 	}
 
-	dev->cmd_msg_buffer = kzalloc(sizeof(struct usb2can_cmd_msg), GFP_KERNEL);
+	dev->cmd_msg_buffer = kzalloc(sizeof(struct usb2can_cmd_msg),
+				      GFP_KERNEL);
 	if (!dev->cmd_msg_buffer) {
 		dev_err(&intf->dev, "Couldn't alloc Tx buffer");
 		goto cleanup_intr_in_buffer;
@@ -971,7 +994,10 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
 		dev_err(netdev->dev.parent, "can't get firmware version");
 		goto cleanup_cmd_msg_buffer;
 	} else {
-		dev_info(netdev->dev.parent, "firmware: %d.%d, hardware: %d.%d", (u8)(version>>24),(u8)(version>>16), (u8)(version>>8), (u8)version);
+		dev_info(netdev->dev.parent,
+			 "firmware: %d.%d, hardware: %d.%d",
+			 (u8)(version>>24),(u8)(version>>16),
+			 (u8)(version>>8), (u8)version);
 	}
 
 	err = register_candev(netdev);
