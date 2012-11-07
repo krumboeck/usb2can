@@ -409,6 +409,8 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 
 		dev->can.can_stats.bus_error++;
 
+		cf->can_id = CAN_ERR_FLAG;
+		cf->can_dlc = CAN_ERR_DLC;
 
 		switch (state) {
 			case USB2CAN_STATUSMSG_OK:
@@ -419,6 +421,7 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 			case USB2CAN_STATUSMSG_BUSOFF:
 				dev->can.state = CAN_STATE_BUS_OFF;
 				cf->can_id |= CAN_ERR_BUSOFF;
+				can_bus_off(dev->netdev);
 				break;
 			default:
 				dev->can.state = CAN_STATE_ERROR_WARNING;
@@ -446,17 +449,20 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 				cf->data[2] |= CAN_ERR_PROT_STUFF;
 				break;
 			case USB2CAN_STATUSMSG_OVERRUN:
+				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
 					CAN_ERR_CRTL_TX_OVERFLOW : CAN_ERR_CRTL_RX_OVERFLOW;
 				cf->data[2] |= CAN_ERR_PROT_OVERLOAD;
 				stats->rx_over_errors++;
 				break;
 			case USB2CAN_STATUSMSG_BUSLIGHT:
+				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
 					CAN_ERR_CRTL_TX_WARNING : CAN_ERR_CRTL_RX_WARNING;
 				dev->can.can_stats.error_warning++;
 				break;
 			case USB2CAN_STATUSMSG_BUSHEAVY:
+				cf->can_id |= CAN_ERR_CRTL;
 				cf->data[1] = (txerr > rxerr) ?
 					CAN_ERR_CRTL_TX_PASSIVE : CAN_ERR_CRTL_RX_PASSIVE;
 				dev->can.can_stats.error_passive++;
@@ -472,6 +478,9 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 		} else {
 			stats->rx_errors++;
 		}
+
+                cf->data[6] = txerr;
+                cf->data[7] = rxerr;
 		
 	} else {
 		dev_warn(dev->udev->dev.parent, "frame type %d unknown", msg->type);
