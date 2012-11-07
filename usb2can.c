@@ -82,6 +82,20 @@
 
 /* frame types */
 #define USB2CAN_TYPE_CAN_FRAME 0
+#define USB2CAN_TYPE_ERROR_FRAME 3
+
+/* status */
+#define USB2CAN_STATUSMSG_OK        0x00  /* Normal condition. */
+#define USB2CAN_STATUSMSG_OVERRUN   0x01  /* Overrun occured when sending data to CAN bus */
+#define USB2CAN_STATUSMSG_BUSLIGHT  0x02  /* Error counter has reached 96 */
+#define USB2CAN_STATUSMSG_BUSHEAVY  0x03  /* Error counter has reached 128 */
+#define USB2CAN_STATUSMSG_BUSOFF    0x04  /* Device is in BUSOFF */
+#define USB2CAN_STATUSMSG_STUFF     0x20  /* Stuff Error */
+#define USB2CAN_STATUSMSG_FORM      0x21  /* Form Error */
+#define USB2CAN_STATUSMSG_ACK       0x23  /* Ack Error */
+#define USB2CAN_STATUSMSG_BIT0      0x24  /* Bit1 Error */
+#define USB2CAN_STATUSMSG_BIT1      0x25  /* Bit0 Error */
+#define USB2CAN_STATUSMSG_CRC       0x26  /* CRC Error */
 
 
 /*
@@ -371,11 +385,11 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 	int i;
 	struct net_device_stats *stats = &dev->netdev->stats;
 
-	if (msg->type == USB2CAN_TYPE_CAN_FRAME) {
-	        skb = alloc_can_skb(dev->netdev, &cf);
-		if (skb == NULL)
-			return;
+        skb = alloc_can_skb(dev->netdev, &cf);
+	if (skb == NULL)
+		return;
 
+	if (msg->type == USB2CAN_TYPE_CAN_FRAME) {
 		cf->can_id = be32_to_cpu(msg->id);
 		cf->can_dlc = get_can_dlc(msg->dlc & 0xF);
 
@@ -388,15 +402,85 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 			for (i = 0; i < cf->can_dlc; i++)
 				cf->data[i] = msg->data[i];
 		}
+	} else if (msg->type == USB2CAN_TYPE_ERROR_FRAME) {
+		u8 state = msg->data[0];
+		u8 txerr = msg->data[2];
+		u8 rxerr = msg->data[3];
+
+		dev->can.can_stats.bus_error++;
 
 
-		netif_rx(skb);
+		switch (state) {
+			case USB2CAN_STATUSMSG_OK:
+				dev->can.state = CAN_STATE_ERROR_ACTIVE;
+		                cf->can_id |= CAN_ERR_PROT;
+				cf->data[2] = CAN_ERR_PROT_ACTIVE;
+				break;
+			case USB2CAN_STATUSMSG_BUSOFF:
+				dev->can.state = CAN_STATE_BUS_OFF;
+				cf->can_id |= CAN_ERR_BUSOFF;
+				break;
+			default:
+				dev->can.state = CAN_STATE_ERROR_WARNING;
+				cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+				break;
+		}
 
-		stats->rx_packets++;
-		stats->rx_bytes += cf->can_dlc;
+		switch (state) {
+			case USB2CAN_STATUSMSG_ACK:
+				cf->can_id |= CAN_ERR_ACK;
+				break;
+			case USB2CAN_STATUSMSG_CRC:
+				cf->data[2] |= CAN_ERR_PROT_BIT;
+				break;
+			case USB2CAN_STATUSMSG_BIT0:
+				cf->data[2] |= CAN_ERR_PROT_BIT0;
+				break;
+			case USB2CAN_STATUSMSG_BIT1:
+				cf->data[2] |= CAN_ERR_PROT_BIT1;
+				break;
+			case USB2CAN_STATUSMSG_FORM:
+				cf->data[2] |= CAN_ERR_PROT_FORM;
+				break;
+			case USB2CAN_STATUSMSG_STUFF:
+				cf->data[2] |= CAN_ERR_PROT_STUFF;
+				break;
+			case USB2CAN_STATUSMSG_OVERRUN:
+				cf->data[1] = (txerr > rxerr) ?
+					CAN_ERR_CRTL_TX_OVERFLOW : CAN_ERR_CRTL_RX_OVERFLOW;
+				cf->data[2] |= CAN_ERR_PROT_OVERLOAD;
+				stats->rx_over_errors++;
+				break;
+			case USB2CAN_STATUSMSG_BUSLIGHT:
+				cf->data[1] = (txerr > rxerr) ?
+					CAN_ERR_CRTL_TX_WARNING : CAN_ERR_CRTL_RX_WARNING;
+				dev->can.can_stats.error_warning++;
+				break;
+			case USB2CAN_STATUSMSG_BUSHEAVY:
+				cf->data[1] = (txerr > rxerr) ?
+					CAN_ERR_CRTL_TX_PASSIVE : CAN_ERR_CRTL_RX_PASSIVE;
+				dev->can.can_stats.error_passive++;
+				break;
+			default:
+				cf->data[2] |= CAN_ERR_PROT_UNSPEC;
+				break;
+		}
+
+                if ((msg->data[1]) == 0 && state != USB2CAN_STATUSMSG_OK) {
+                        cf->data[2] |= CAN_ERR_PROT_TX;
+			stats->tx_errors++;
+		} else {
+			stats->rx_errors++;
+		}
+		
 	} else {
 		dev_warn(dev->udev->dev.parent, "frame type %d unknown", msg->type);
 	}
+
+	netif_rx(skb);
+
+	stats->rx_packets++;
+	stats->rx_bytes += cf->can_dlc;
 }
 
 static void usb2can_read_bulk_callback(struct urb *urb)
