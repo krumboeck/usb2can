@@ -902,8 +902,17 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
 	struct net_device *netdev;
 	struct usb2can *dev;
 	int i, err = -ENOMEM;
-
 	u32 version;
+        char buf[18];
+        struct usb_device *usbdev = interface_to_usbdev(intf);
+
+        /* product id looks strange, better we also check iProdukt string */
+        if (usb_string(usbdev, usbdev->descriptor.iProduct, buf, sizeof(buf)) > 0
+            && strcmp(buf, "USB2CAN converter")) {
+                dev_info(&usbdev->dev, "ignoring: not an USB2CAN converter");
+                return -ENODEV;
+        }
+
 
 	netdev = alloc_candev(sizeof(struct usb2can), MAX_TX_URBS);
 	if (!netdev) {
@@ -913,7 +922,7 @@ static int usb2can_probe(struct usb_interface *intf, const struct usb_device_id 
 
 	dev = netdev_priv(netdev);
 
-	dev->udev = interface_to_usbdev(intf);
+	dev->udev = usbdev;
 	dev->netdev = netdev;
 
 	dev->can.state = CAN_STATE_STOPPED;
