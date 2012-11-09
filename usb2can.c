@@ -34,81 +34,82 @@
 
 
 /* Define these values to match your devices */
-#define USB2CAN_VENDOR_ID	0x0483
-#define USB2CAN_PRODUCT_ID	0x1234
+#define USB2CAN_VENDOR_ID		0x0483
+#define USB2CAN_PRODUCT_ID		0x1234
 
-#define USB2CAN_RESET                1
-#define USB2CAN_OPEN                 2
-#define USB2CAN_CLOSE                3
-#define USB2CAN_SET_SPEED            4
-#define USB2CAN_SET_MASK_FILTER      5
-#define USB2CAN_GET_STATUS           6
-#define USB2CAN_GET_STATISTICS       7
-#define USB2CAN_GET_SERIAL           8
-#define USB2CAN_GET_SOFTW_VER        9
-#define USB2CAN_GET_HARDW_VER       10
-#define USB2CAN_RESET_TIMESTAMP     11
-#define USB2CAN_GET_SOFTW_HARDW_VER 12
+#define USB2CAN_RESET			1
+#define USB2CAN_OPEN			2
+#define USB2CAN_CLOSE			3
+#define USB2CAN_SET_SPEED		4
+#define USB2CAN_SET_MASK_FILTER		5
+#define USB2CAN_GET_STATUS		6
+#define USB2CAN_GET_STATISTICS		7
+#define USB2CAN_GET_SERIAL		8
+#define USB2CAN_GET_SOFTW_VER		9
+#define USB2CAN_GET_HARDW_VER		10
+#define USB2CAN_RESET_TIMESTAMP		11
+#define USB2CAN_GET_SOFTW_HARDW_VER	12
 
-#define USB2CAN_CMD_SUCCESS         0
-#define USB2CAN_CMD_ERROR         255
+#define USB2CAN_CMD_SUCCESS		0
+#define USB2CAN_CMD_ERROR		255
 
-/* baudrate message flags */
-#define USB2CAN_BAUD_MANUAL    0x09
-#define USB2CAN_TSEG1_MIN      1
-#define USB2CAN_TSEG1_MAX      8
-#define USB2CAN_TSEG2_MIN      1
-#define USB2CAN_TSEG2_MAX      8
-#define USB2CAN_SJW_MAX        4
-#define USB2CAN_BRP_MIN        1
-#define USB2CAN_BRP_MAX        32
-#define USB2CAN_BRP_INC        1
+/* bittiming constants */
+#define USB2CAN_BAUD_MANUAL		0x09
+#define USB2CAN_TSEG1_MIN		1
+#define USB2CAN_TSEG1_MAX		8
+#define USB2CAN_TSEG2_MIN		1
+#define USB2CAN_TSEG2_MAX		8
+#define USB2CAN_SJW_MAX			4
+#define USB2CAN_BRP_MIN			1
+#define USB2CAN_BRP_MAX			32
+#define USB2CAN_BRP_INC			1
 
 /* frame */
-#define USB2CAN_CMD_START	0x11
-#define USB2CAN_CMD_END		0x22
+#define USB2CAN_CMD_START		0x11
+#define USB2CAN_CMD_END			0x22
 
-#define USB2CAN_DATA_START	0x55
-#define USB2CAN_DATA_END	0xAA
+#define USB2CAN_DATA_START		0x55
+#define USB2CAN_DATA_END		0xAA
 
 /* message flags */
-#define USB2CAN_EXTID          0x01
-#define USB2CAN_RTR            0x02
-#define USB2CAN_ERR_FLAG       0x04
+#define USB2CAN_EXTID			0x01
+#define USB2CAN_RTR			0x02
+#define USB2CAN_ERR_FLAG		0x04
 
-#define USB2CAN_SILENT         0x00000001
-#define USB2CAN_LOOPBACK       0x00000002
-#define USB2CAN_DAR_DISABLE    0x00000004
-#define USB2CAN_STATUS_FRAME   0x00000008
+#define USB2CAN_SILENT			0x00000001
+#define USB2CAN_LOOPBACK		0x00000002
+#define USB2CAN_DAR_DISABLE		0x00000004
+#define USB2CAN_STATUS_FRAME		0x00000008
 
 /* frame types */
-#define USB2CAN_TYPE_CAN_FRAME 0
-#define USB2CAN_TYPE_ERROR_FRAME 3
+#define USB2CAN_TYPE_CAN_FRAME		0
+#define USB2CAN_TYPE_ERROR_FRAME	3
 
 /* status */
-#define USB2CAN_STATUSMSG_OK        0x00  /* Normal condition. */
-#define USB2CAN_STATUSMSG_OVERRUN   0x01  /* Overrun occured when sending */
-#define USB2CAN_STATUSMSG_BUSLIGHT  0x02  /* Error counter has reached 96 */
-#define USB2CAN_STATUSMSG_BUSHEAVY  0x03  /* Error counter has reached 128 */
-#define USB2CAN_STATUSMSG_BUSOFF    0x04  /* Device is in BUSOFF */
-#define USB2CAN_STATUSMSG_STUFF     0x20  /* Stuff Error */
-#define USB2CAN_STATUSMSG_FORM      0x21  /* Form Error */
-#define USB2CAN_STATUSMSG_ACK       0x23  /* Ack Error */
-#define USB2CAN_STATUSMSG_BIT0      0x24  /* Bit1 Error */
-#define USB2CAN_STATUSMSG_BIT1      0x25  /* Bit0 Error */
-#define USB2CAN_STATUSMSG_CRC       0x26  /* CRC Error */
+#define USB2CAN_STATUSMSG_OK		0x00  /* Normal condition. */
+#define USB2CAN_STATUSMSG_OVERRUN	0x01  /* Overrun occured when sending */
+#define USB2CAN_STATUSMSG_BUSLIGHT	0x02  /* Error counter has reached 96 */
+#define USB2CAN_STATUSMSG_BUSHEAVY	0x03  /* Error count. has reached 128 */
+#define USB2CAN_STATUSMSG_BUSOFF	0x04  /* Device is in BUSOFF */
+#define USB2CAN_STATUSMSG_STUFF		0x20  /* Stuff Error */
+#define USB2CAN_STATUSMSG_FORM		0x21  /* Form Error */
+#define USB2CAN_STATUSMSG_ACK		0x23  /* Ack Error */
+#define USB2CAN_STATUSMSG_BIT0		0x24  /* Bit1 Error */
+#define USB2CAN_STATUSMSG_BIT1		0x25  /* Bit0 Error */
+#define USB2CAN_STATUSMSG_CRC		0x26  /* CRC Error */
 
+#define USB2CAN_RP_MASK			0x7F  /* Mask for Receive Error Bit */
 
 /*
  * Device runs with 8MHz
  */
-#define USB2CAN_ARM7_CLOCK 8000000
+#define USB2CAN_ARM7_CLOCK		8000000
 
-#define MAX_RX_URBS 10
-#define MAX_TX_URBS 10
+#define MAX_RX_URBS			10
+#define MAX_TX_URBS			10
 
-#define RX_BUFFER_SIZE      64
-#define INTR_IN_BUFFER_SIZE 4
+#define RX_BUFFER_SIZE			64
+#define INTR_IN_BUFFER_SIZE		4
 
 
 /* table of devices that work with this driver */
@@ -416,8 +417,10 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 	} else if (msg->type == USB2CAN_TYPE_ERROR_FRAME &&
 		   msg->flags == USB2CAN_ERR_FLAG) {
 		u8 state = msg->data[0];
+		u8 rxerr = msg->data[1] & USB2CAN_RP_MASK;
 		u8 txerr = msg->data[2];
-		u8 rxerr = msg->data[3];
+		int rx_errors = 0;
+		int tx_errors = 0;
 
 		dev->can.can_stats.bus_error++;
 
@@ -444,21 +447,27 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 		switch (state) {
 			case USB2CAN_STATUSMSG_ACK:
 				cf->can_id |= CAN_ERR_ACK;
+				tx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_CRC:
 				cf->data[2] |= CAN_ERR_PROT_BIT;
+				rx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_BIT0:
 				cf->data[2] |= CAN_ERR_PROT_BIT0;
+				tx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_BIT1:
 				cf->data[2] |= CAN_ERR_PROT_BIT1;
+				tx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_FORM:
 				cf->data[2] |= CAN_ERR_PROT_FORM;
+				rx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_STUFF:
 				cf->data[2] |= CAN_ERR_PROT_STUFF;
+				rx_errors = 1;
 				break;
 			case USB2CAN_STATUSMSG_OVERRUN:
 				cf->can_id |= CAN_ERR_CRTL;
@@ -487,15 +496,16 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 				break;
 		}
 
-                if ((msg->data[1]) == 0 && state != USB2CAN_STATUSMSG_OK) {
-                        cf->data[2] |= CAN_ERR_PROT_TX;
+		if (tx_errors) {
+			cf->data[2] |= CAN_ERR_PROT_TX;
 			stats->tx_errors++;
-		} else {
+		}
+		if (rx_errors) {
 			stats->rx_errors++;
 		}
 
-                cf->data[6] = txerr;
-                cf->data[7] = rxerr;
+		cf->data[6] = txerr;
+		cf->data[7] = rxerr;
 		
 	} else {
 		dev_warn(dev->udev->dev.parent, "frame type %d unknown",
