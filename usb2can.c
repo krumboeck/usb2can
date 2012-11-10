@@ -1063,6 +1063,7 @@ static struct usb_driver usb2can_driver = {
 	.probe =	usb2can_probe,
 	.disconnect =	usb2can_disconnect,
 	.id_table =	usb2can_table,
+	.soft_unbind =  1,
 };
 
 static int __init usb2can_init(void)
