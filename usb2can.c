@@ -33,10 +33,35 @@
 #include <linux/can/error.h>
 
 
-/* Define these values to match your devices */
+/* driver constants */
+#define MAX_RX_URBS			10
+#define MAX_TX_URBS			10
+#define RX_BUFFER_SIZE			64
+#define INTR_IN_BUFFER_SIZE		4
+
+/* vendor and product id */
 #define USB2CAN_VENDOR_ID		0x0483
 #define USB2CAN_PRODUCT_ID		0x1234
 
+/* bittiming constants */
+#define USB2CAN_ARM7_CLOCK		8000000
+#define USB2CAN_BAUD_MANUAL		0x09
+#define USB2CAN_TSEG1_MIN		1
+#define USB2CAN_TSEG1_MAX		8
+#define USB2CAN_TSEG2_MIN		1
+#define USB2CAN_TSEG2_MAX		8
+#define USB2CAN_SJW_MAX			4
+#define USB2CAN_BRP_MIN			1
+#define USB2CAN_BRP_MAX			32
+#define USB2CAN_BRP_INC			1
+
+/* setup flags */
+#define USB2CAN_SILENT			0x00000001
+#define USB2CAN_LOOPBACK		0x00000002
+#define USB2CAN_DAR_DISABLE		0x00000004
+#define USB2CAN_STATUS_FRAME		0x00000008
+
+/* commands */
 #define USB2CAN_RESET			1
 #define USB2CAN_OPEN			2
 #define USB2CAN_CLOSE			3
@@ -50,40 +75,22 @@
 #define USB2CAN_RESET_TIMESTAMP		11
 #define USB2CAN_GET_SOFTW_HARDW_VER	12
 
-#define USB2CAN_CMD_SUCCESS		0
-#define USB2CAN_CMD_ERROR		255
-
-/* bittiming constants */
-#define USB2CAN_BAUD_MANUAL		0x09
-#define USB2CAN_TSEG1_MIN		1
-#define USB2CAN_TSEG1_MAX		8
-#define USB2CAN_TSEG2_MIN		1
-#define USB2CAN_TSEG2_MAX		8
-#define USB2CAN_SJW_MAX			4
-#define USB2CAN_BRP_MIN			1
-#define USB2CAN_BRP_MAX			32
-#define USB2CAN_BRP_INC			1
-
-/* frame */
 #define USB2CAN_CMD_START		0x11
 #define USB2CAN_CMD_END			0x22
 
+#define USB2CAN_CMD_SUCCESS		0
+#define USB2CAN_CMD_ERROR		255
+
+/* frames */
 #define USB2CAN_DATA_START		0x55
 #define USB2CAN_DATA_END		0xAA
 
-/* message flags */
+#define USB2CAN_TYPE_CAN_FRAME		0
+#define USB2CAN_TYPE_ERROR_FRAME	3
+
 #define USB2CAN_EXTID			0x01
 #define USB2CAN_RTR			0x02
 #define USB2CAN_ERR_FLAG		0x04
-
-#define USB2CAN_SILENT			0x00000001
-#define USB2CAN_LOOPBACK		0x00000002
-#define USB2CAN_DAR_DISABLE		0x00000004
-#define USB2CAN_STATUS_FRAME		0x00000008
-
-/* frame types */
-#define USB2CAN_TYPE_CAN_FRAME		0
-#define USB2CAN_TYPE_ERROR_FRAME	3
 
 /* status */
 #define USB2CAN_STATUSMSG_OK		0x00  /* Normal condition. */
@@ -99,17 +106,6 @@
 #define USB2CAN_STATUSMSG_CRC		0x26  /* CRC Error */
 
 #define USB2CAN_RP_MASK			0x7F  /* Mask for Receive Error Bit */
-
-/*
- * Device runs with 8MHz
- */
-#define USB2CAN_ARM7_CLOCK		8000000
-
-#define MAX_RX_URBS			10
-#define MAX_TX_URBS			10
-
-#define RX_BUFFER_SIZE			64
-#define INTR_IN_BUFFER_SIZE		4
 
 
 /* table of devices that work with this driver */
@@ -151,33 +147,36 @@ struct usb2can {
 	unsigned int free_slots; /* remember number of available slots */
 };
 
+/* tx frame */
 struct __packed usb2can_tx_msg {
 	u8 begin;
 	u8 flags;	/* RTR and EXT_ID flag */
 	__be32 id;	/* upper 3 bits not used */
 	u8 dlc;		/* data length code 0-8 bytes */
-	u8 data[8];
+	u8 data[8];	/* 64-bit data */
 	u8 end;
 };
 
+/* rx frame */
 struct __packed usb2can_rx_msg {
 	u8 begin;
-	u8 type;	/* frame type */
-	u8 flags;	/* RTR and EXT_ID flag */
-	__be32 id;	/* upper 3 bits not used */
-	u8 dlc;		/* data length code 0-8 bytes */
-	u8 data[8];
-	__be32 timestamp;
+	u8 type;		/* frame type */
+	u8 flags;		/* RTR and EXT_ID flag */
+	__be32 id;		/* upper 3 bits not used */
+	u8 dlc;			/* data length code 0-8 bytes */
+	u8 data[8];		/* 64-bit data */
+	__be32 timestamp;	/* 32-bit timestamp */
 	u8 end;
 };
 
+/* command frame */
 struct __packed usb2can_cmd_msg {
 	u8 begin;
-	u8 channel;
-	u8 command;
-	u8 opt1;
-	u8 opt2;
-	u8 data[10];
+	u8 channel;	/* unkown - always 0 */
+	u8 command;	/* command to execute */
+	u8 opt1;	/* optional parameter / return value */
+	u8 opt2;	/* optional parameter 2 */
+	u8 data[10];	/* optional parameter and data */
 	u8 end;
 };
 
@@ -206,6 +205,10 @@ static int usb2can_wait_cmd_msg(struct usb2can *dev, u8 *msg, int size,
 			    1000);
 }
 
+/*
+ * Send command to device and receive result.
+ * Command was successful When opt1 = 0.
+ */
 static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
 			    struct usb2can_cmd_msg *in)
 {
@@ -245,6 +248,9 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
 	return 0;
 }
 
+/*
+ * Send open command to device
+ */
 static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2,
 			    u8 sjw, u16 brp, u32 ctrlmode)
 {
@@ -279,6 +285,9 @@ static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2,
 	return usb2can_send_cmd(dev, &outmsg, &inmsg);
 }
 
+/*
+ * Send close command to device
+ */
 static int usb2can_cmd_close(struct usb2can *dev)
 {
 	struct usb2can_cmd_msg	outmsg;
@@ -290,6 +299,9 @@ static int usb2can_cmd_close(struct usb2can *dev)
 	return usb2can_send_cmd(dev, &outmsg, &inmsg);
 }
 
+/*
+ * Get firmware and hardware version
+ */
 static int usb2can_cmd_version(struct usb2can *dev, u32 *res)
 {
 	struct usb2can_cmd_msg	outmsg;
@@ -310,6 +322,12 @@ static int usb2can_cmd_version(struct usb2can *dev, u32 *res)
 	return err;
 }
 
+/*
+ * Set network device mode
+ *
+ * Maybe we should leave this function empty, because the device
+ * set mode variable with open command.
+ */
 static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 {
 	struct usb2can *dev = netdev_priv(netdev);
@@ -338,6 +356,12 @@ static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 	return 0;
 }
 
+/*
+ * Set network device bittiming
+ *
+ * Maybe we should leave this function empty, because the device
+ * set bittiming variable with open command.
+ */
 static int usb2can_set_bittiming(struct net_device *netdev)
 {
 	struct usb2can *dev = netdev_priv(netdev);
@@ -390,6 +414,9 @@ static void usb2can_read_interrupt_callback(struct urb *urb)
 			"failed resubmitting intr urb: %d", err);
 }
 
+/*
+ * Read data and status frames
+ */
 static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 {
 	struct can_frame *cf;
@@ -416,6 +443,17 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 		}
 	} else if (msg->type == USB2CAN_TYPE_ERROR_FRAME &&
 		   msg->flags == USB2CAN_ERR_FLAG) {
+
+		/*
+		 * Error message
+		 *
+		 * byte 0: Status
+		 * byte 1: bit   7: Receive Passive
+		 * byte 1: bit 0-6: Receive Error Counter
+		 * byte 2: Transmit Error Counter
+		 * byte 3: Always 0 (maybe reserved for future use)
+		 */
+
 		u8 state = msg->data[0];
 		u8 rxerr = msg->data[1] & USB2CAN_RP_MASK;
 		u8 txerr = msg->data[2];
@@ -518,6 +556,11 @@ static void usb2can_rx_can_msg(struct usb2can *dev, struct usb2can_rx_msg *msg)
 	stats->rx_bytes += cf->can_dlc;
 }
 
+/*
+ * Callback for reading data from device
+ *
+ * Check urb status, call read function and resubmit urb read operation.
+ */
 static void usb2can_read_bulk_callback(struct urb *urb)
 {
 	struct usb2can *dev = urb->context;
@@ -573,6 +616,12 @@ resubmit_urb:
 			"failed resubmitting read bulk urb: %d", retval);
 }
 
+/*
+ * Callback handler for write operations
+ *
+ * Free allocated buffers, check transmit status and
+ * calculate statistic.
+ */
 static void usb2can_write_bulk_callback(struct urb *urb)
 {
 	struct usb2can_tx_urb_context *context = urb->context;
@@ -599,7 +648,6 @@ static void usb2can_write_bulk_callback(struct urb *urb)
 
 	netdev->trans_start = jiffies;
 
-	/* transmission complete interrupt */
 	netdev->stats.tx_packets++;
 	netdev->stats.tx_bytes += context->dlc;
 
@@ -612,6 +660,9 @@ static void usb2can_write_bulk_callback(struct urb *urb)
 		netif_wake_queue(netdev);
 }
 
+/*
+ * Send data to device
+ */
 static netdev_tx_t usb2can_start_xmit(struct sk_buff *skb,
 				      struct net_device *netdev)
 {
@@ -741,6 +792,9 @@ nomem:
 }
 
 
+/*
+ * Start USB device
+ */
 static int usb2can_start(struct usb2can *dev)
 {
 	struct net_device *netdev = dev->netdev;
@@ -839,6 +893,9 @@ failed:
 	return err;
 }
 
+/*
+ * Open USB device
+ */
 static int usb2can_open(struct net_device *netdev)
 {
 	struct usb2can *dev = netdev_priv(netdev);
@@ -885,6 +942,9 @@ static void unlink_all_urbs(struct usb2can *dev)
 		dev->tx_contexts[i].echo_index = MAX_TX_URBS;
 }
 
+/*
+ * Close USB device
+ */
 static int usb2can_close(struct net_device *netdev)
 {
 	struct usb2can *dev = netdev_priv(netdev);
@@ -927,6 +987,13 @@ static struct can_bittiming_const usb2can_bittiming_const = {
 	.brp_inc = USB2CAN_BRP_INC,
 };
 
+/*
+ * Probe USB device
+ *
+ * Check device and firmware.
+ * Set supported modes and bittiming constants.
+ * Allocate some memory.
+ */
 static int usb2can_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
 {
@@ -1037,6 +1104,9 @@ cleanup_candev:
 
 }
 
+/*
+ * Called by the usb core when driver is unloaded or device is removed
+ */
 static void usb2can_disconnect(struct usb_interface *intf)
 {
 	struct usb2can *dev = usb_get_intfdata(intf);
