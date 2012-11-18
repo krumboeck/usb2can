@@ -81,6 +81,16 @@
 #define USB2CAN_CMD_SUCCESS		0
 #define USB2CAN_CMD_ERROR		255
 
+/* statistics */
+#define USB2CAN_STAT_RX_FRAMES		0
+#define USB2CAN_STAT_RX_BYTES		1
+#define USB2CAN_STAT_TX_FRAMES		2
+#define USB2CAN_STAT_TX_BYTES		3
+#define USB2CAN_STAT_OVERRUNS		4
+#define USB2CAN_STAT_WARNINGS		5
+#define USB2CAN_STAT_BUS_OFF		6
+#define USB2CAN_STAT_RESET_STAT		7
+
 /* frames */
 #define USB2CAN_DATA_START		0x55
 #define USB2CAN_DATA_END		0xAA
@@ -321,6 +331,136 @@ static int usb2can_cmd_version(struct usb2can *dev, u32 *res)
 
 	return err;
 }
+
+/*
+ * Get firmware version
+ */
+static ssize_t show_firmware(struct device *d, struct device_attribute *attr, char *buf)
+{
+	struct usb2can_cmd_msg	outmsg;
+	struct usb2can_cmd_msg	inmsg;
+	int err = 0;
+	u16 *value;
+	u16 result;
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	memset(&outmsg, 0, sizeof(struct usb2can_cmd_msg));
+	outmsg.command = USB2CAN_GET_SOFTW_VER;
+
+	err = usb2can_send_cmd(dev, &outmsg, &inmsg);
+	if (err)
+		return -EIO;
+
+	value = (u16 *) inmsg.data;
+	result = be16_to_cpu(*value);
+
+	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
+}
+
+/*
+ * Get hardware version
+ */
+static ssize_t show_hardware(struct device *d, struct device_attribute *attr, char *buf)
+{
+	struct usb2can_cmd_msg	outmsg;
+	struct usb2can_cmd_msg	inmsg;
+	int err = 0;
+	u16 *value;
+	u16 result;
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	memset(&outmsg, 0, sizeof(struct usb2can_cmd_msg));
+	outmsg.command = USB2CAN_GET_HARDW_VER;
+
+	err = usb2can_send_cmd(dev, &outmsg, &inmsg);
+	if (err)
+		return -EIO;
+
+	value = (u16 *) inmsg.data;
+	result = be16_to_cpu(*value);
+
+	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
+}
+
+/*
+ * Get statistic values
+ */
+static ssize_t show_statistics(struct device *d, struct device_attribute *attr, u8 statistic, char *buf)
+{
+	struct usb2can_cmd_msg	outmsg;
+	struct usb2can_cmd_msg	inmsg;
+	int err = 0;
+	u32 *value;
+	u32 result;
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	memset(&outmsg, 0, sizeof(struct usb2can_cmd_msg));
+	outmsg.command = USB2CAN_GET_STATISTICS;
+	outmsg.opt1 = statistic;
+
+	err = usb2can_send_cmd(dev, &outmsg, &inmsg);
+	if (err)
+		return -EIO;
+
+	value = (u32 *) inmsg.data;
+	result = be32_to_cpu(*value);
+
+	return sprintf(buf, "%d\n", result);
+}
+
+static ssize_t show_rx_frames(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_RX_FRAMES, buf);
+}
+
+static ssize_t show_rx_bytes(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_RX_BYTES, buf);
+}
+
+static ssize_t show_tx_frames(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_TX_FRAMES, buf);
+}
+
+static ssize_t show_tx_bytes(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_RX_BYTES, buf);
+}
+
+static ssize_t show_overruns(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_OVERRUNS, buf);
+}
+
+static ssize_t show_warnings(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_WARNINGS, buf);
+}
+
+static ssize_t show_bus_off(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_BUS_OFF, buf);
+}
+
+static ssize_t show_statistic_resets(struct device *d, struct device_attribute *attr, char *buf)
+{
+	return show_statistics(d, attr, USB2CAN_STAT_RESET_STAT, buf);
+}
+
+static DEVICE_ATTR(firmware, S_IRUGO, show_firmware, NULL);
+static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
+static DEVICE_ATTR(can_rx_frames, S_IRUGO, show_rx_frames, NULL);
+static DEVICE_ATTR(can_rx_bytes, S_IRUGO, show_rx_bytes, NULL);
+static DEVICE_ATTR(can_tx_frames, S_IRUGO, show_tx_frames, NULL);
+static DEVICE_ATTR(can_tx_bytes, S_IRUGO, show_tx_bytes, NULL);
+static DEVICE_ATTR(can_overruns, S_IRUGO, show_overruns, NULL);
+static DEVICE_ATTR(can_warnings, S_IRUGO, show_warnings, NULL);
+static DEVICE_ATTR(can_bus_off_counter, S_IRUGO, show_bus_off, NULL);
+static DEVICE_ATTR(can_statistic_resets, S_IRUGO, show_statistic_resets, NULL);
 
 /*
  * Set network device mode
@@ -1084,6 +1224,46 @@ static int usb2can_probe(struct usb_interface *intf,
 		goto cleanup_cmd_msg_buffer;
 	}
 
+	if (device_create_file(&intf->dev, &dev_attr_firmware))
+		dev_err(&intf->dev,
+			"Couldn't create device file for firmware\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_hardware))
+		dev_err(&intf->dev,
+			"Couldn't create device file for hardware\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_rx_frames))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_rx_frames\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_rx_bytes))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_rx_bytes\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_tx_frames))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_tx_frames\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_tx_bytes))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_tx_bytes\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_overruns))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_overruns\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_warnings))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_warnings\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_bus_off_counter))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_bus_off_counter\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_statistic_resets))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_statistic_resets\n");
+
 	/* let the user know what node this device is now attached to */
 	dev_info(netdev->dev.parent, "device registered as %s", netdev->name);
 	return 0;
@@ -1110,6 +1290,17 @@ cleanup_candev:
 static void usb2can_disconnect(struct usb_interface *intf)
 {
 	struct usb2can *dev = usb_get_intfdata(intf);
+
+	device_remove_file(&intf->dev, &dev_attr_firmware);
+	device_remove_file(&intf->dev, &dev_attr_hardware);
+	device_remove_file(&intf->dev, &dev_attr_can_rx_frames);
+	device_remove_file(&intf->dev, &dev_attr_can_rx_bytes);
+	device_remove_file(&intf->dev, &dev_attr_can_tx_frames);
+	device_remove_file(&intf->dev, &dev_attr_can_tx_bytes);
+	device_remove_file(&intf->dev, &dev_attr_can_overruns);
+	device_remove_file(&intf->dev, &dev_attr_can_warnings);
+	device_remove_file(&intf->dev, &dev_attr_can_bus_off_counter);
+	device_remove_file(&intf->dev, &dev_attr_can_statistic_resets);
 
 	usb_set_intfdata(intf, NULL);
 
