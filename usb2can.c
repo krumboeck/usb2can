@@ -44,7 +44,7 @@
 #define USB2CAN_PRODUCT_ID		0x1234
 
 /* bittiming constants */
-#define USB2CAN_ARM7_CLOCK		8000000
+#define USB2CAN_ABP_CLOCK		32000000
 #define USB2CAN_BAUD_MANUAL		0x09
 #define USB2CAN_TSEG1_MIN		1
 #define USB2CAN_TSEG1_MAX		8
@@ -1184,7 +1184,7 @@ static int usb2can_probe(struct usb_interface *intf,
 	dev->netdev = netdev;
 
 	dev->can.state = CAN_STATE_STOPPED;
-	dev->can.clock.freq = USB2CAN_ARM7_CLOCK;
+	dev->can.clock.freq = USB2CAN_ABP_CLOCK;
 	dev->can.bittiming_const = &usb2can_bittiming_const;
 	dev->can.do_set_bittiming = usb2can_set_bittiming;
 	dev->can.do_set_mode = usb2can_set_mode;
