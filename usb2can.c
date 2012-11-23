@@ -37,7 +37,6 @@
 #define MAX_RX_URBS			10
 #define MAX_TX_URBS			10
 #define RX_BUFFER_SIZE			64
-#define INTR_IN_BUFFER_SIZE		4
 
 /* vendor and product id */
 #define USB2CAN_VENDOR_ID		0x0483
@@ -149,11 +148,8 @@ struct usb2can {
 
 	struct usb_anchor rx_submitted;
 
-	struct urb *intr_urb;
-
 	u8 *cmd_msg_buffer;
 
-	u8 *intr_in_buffer;
 	unsigned int free_slots; /* remember number of available slots */
 };
 
@@ -517,61 +513,11 @@ static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 }
 
 /*
- * Set network device bittiming
- *
- * Maybe we should leave this function empty, because the device
- * set bittiming variable with open command.
+ * We set bittiming when we start device. This is a firmware limitation.
  */
 static int usb2can_set_bittiming(struct net_device *netdev)
 {
-	struct usb2can *dev = netdev_priv(netdev);
-	struct can_bittiming *bt = &dev->can.bittiming;
-	int err = 0;
-
-       	err = usb2can_cmd_close(dev);
-	if (err)
-		dev_warn(netdev->dev.parent, "couldn't stop device");
-
-       	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
-			bt->phase_seg1, bt->phase_seg2,
-			bt->sjw, bt->brp, dev->can.ctrlmode);
-	if (err)
-		dev_warn(netdev->dev.parent, "couldn't start device");
-	return err;
-}
-
-static void usb2can_read_interrupt_callback(struct urb *urb)
-{
-	struct usb2can *dev = urb->context;
-	struct net_device *netdev = dev->netdev;
-	int err;
-
-	if (!netif_device_present(netdev))
-		return;
-
-	switch (urb->status) {
-	case 0:
-		dev->free_slots = dev->intr_in_buffer[1];
-		break;
-
-	case -ECONNRESET: /* unlink */
-	case -ENOENT:
-	case -ESHUTDOWN:
-		return;
-
-	default:
-		dev_info(netdev->dev.parent, "Rx interrupt aborted %d\n",
-			 urb->status);
-		break;
-	}
-
-	err = usb_submit_urb(urb, GFP_ATOMIC);
-
-	if (err == -ENODEV)
-		netif_device_detach(netdev);
-	else if (err)
-		dev_err(netdev->dev.parent,
-			"failed resubmitting intr urb: %d\n", err);
+	return 0;
 }
 
 /*
@@ -961,7 +907,6 @@ static int usb2can_start(struct usb2can *dev)
 	int err, i;
 	struct can_bittiming *bt = &dev->can.bittiming;
 
-	dev->intr_in_buffer[0] = 0;
 	dev->free_slots = 15; /* initial size */
 
 	for (i = 0; i < MAX_RX_URBS; i++) {
@@ -1015,24 +960,6 @@ static int usb2can_start(struct usb2can *dev)
 	/* Warn if we've couldn't transmit all the URBs */
 	if (i < MAX_RX_URBS)
 		dev_warn(netdev->dev.parent, "rx performance may be slow\n");
-
-	/* Setup and start interrupt URB */
-	usb_fill_int_urb(dev->intr_urb, dev->udev,
-			 usb_rcvintpipe(dev->udev, 1),
-			 dev->intr_in_buffer,
-			 INTR_IN_BUFFER_SIZE,
-			 usb2can_read_interrupt_callback, dev, 1);
-
-	err = usb_submit_urb(dev->intr_urb, GFP_KERNEL);
-	if (err) {
-		if (err == -ENODEV)
-			netif_device_detach(dev->netdev);
-
-		dev_warn(netdev->dev.parent, "intr URB submit failed: %d\n",
-			 err);
-
-		return err;
-	}
 
 	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1,
 			       bt->phase_seg2, bt->sjw, bt->brp,
@@ -1090,8 +1017,6 @@ static int usb2can_open(struct net_device *netdev)
 static void unlink_all_urbs(struct usb2can *dev)
 {
 	int i;
-
-	usb_unlink_urb(dev->intr_urb);
 
 	usb_kill_anchored_urbs(&dev->rx_submitted);
 
@@ -1203,23 +1128,11 @@ static int usb2can_probe(struct usb_interface *intf,
 	for (i = 0; i < MAX_TX_URBS; i++)
 		dev->tx_contexts[i].echo_index = MAX_TX_URBS;
 
-	dev->intr_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!dev->intr_urb) {
-		dev_err(&intf->dev, "Couldn't alloc intr URB\n");
-		goto cleanup_candev;
-	}
-
-	dev->intr_in_buffer = kzalloc(INTR_IN_BUFFER_SIZE, GFP_KERNEL);
-	if (!dev->intr_in_buffer) {
-		dev_err(&intf->dev, "Couldn't alloc Intr buffer\n");
-		goto cleanup_intr_urb;
-	}
-
 	dev->cmd_msg_buffer = kzalloc(sizeof(struct usb2can_cmd_msg),
 				      GFP_KERNEL);
 	if (!dev->cmd_msg_buffer) {
 		dev_err(&intf->dev, "Couldn't alloc Tx buffer\n");
-		goto cleanup_intr_in_buffer;
+		goto cleanup_candev;
 	}
 
 	usb_set_intfdata(intf, dev);
@@ -1291,12 +1204,6 @@ static int usb2can_probe(struct usb_interface *intf,
 cleanup_cmd_msg_buffer:
 	kfree(dev->cmd_msg_buffer);
 
-cleanup_intr_in_buffer:
-	kfree(dev->intr_in_buffer);
-
-cleanup_intr_urb:
-	usb_free_urb(dev->intr_urb);
-
 cleanup_candev:
 	free_candev(netdev);
 
@@ -1331,10 +1238,6 @@ static void usb2can_disconnect(struct usb_interface *intf)
 		free_candev(dev->netdev);
 
 		unlink_all_urbs(dev);
-
-		usb_free_urb(dev->intr_urb);
-
-		kfree(dev->intr_in_buffer);
 	}
 
 }
