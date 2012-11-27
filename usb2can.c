@@ -19,6 +19,10 @@
  * This driver is based on the 3.2.0 version of drivers/net/can/usb/ems_usb.c
  * and drivers/net/can/usb/esd_usb2.c
  *
+ * Many thanks to Gerhard Bertelsmann (info@gerhard-bertelsmann.de)
+ * for testing and fixing this driver. Also many thanks to "8 devices",
+ * who were very cooperative and answered my questions.
+ *
  */
 
 #include <linux/init.h>
@@ -282,7 +286,7 @@ static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2,
 
 	// BRP
 	bebrp = cpu_to_be16(brp);
-	memcpy(&outmsg.data[3], &beflags, sizeof(bebrp));
+	memcpy(&outmsg.data[3], &bebrp, sizeof(bebrp));
 
 	// flags
 	beflags = cpu_to_be32(flags);
