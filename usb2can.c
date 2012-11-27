@@ -46,12 +46,12 @@
 #define USB2CAN_ABP_CLOCK		32000000
 #define USB2CAN_BAUD_MANUAL		0x09
 #define USB2CAN_TSEG1_MIN		1
-#define USB2CAN_TSEG1_MAX		8
+#define USB2CAN_TSEG1_MAX		16
 #define USB2CAN_TSEG2_MIN		1
 #define USB2CAN_TSEG2_MAX		8
 #define USB2CAN_SJW_MAX			4
 #define USB2CAN_BRP_MIN			1
-#define USB2CAN_BRP_MAX			32
+#define USB2CAN_BRP_MAX			1024
 #define USB2CAN_BRP_INC			1
 
 /* setup flags */
@@ -496,8 +496,9 @@ static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 	switch (mode) {
 	case CAN_MODE_START:
 		err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
-				bt->phase_seg1, bt->phase_seg2,
-				bt->sjw, bt->brp, dev->can.ctrlmode);
+				(bt->prop_seg + bt->phase_seg1),
+				bt->phase_seg2, bt->sjw, bt->brp,
+				dev->can.ctrlmode);
 		if (err)
 			dev_warn(netdev->dev.parent, "couldn't start device");
 
@@ -961,7 +962,8 @@ static int usb2can_start(struct usb2can *dev)
 	if (i < MAX_RX_URBS)
 		dev_warn(netdev->dev.parent, "rx performance may be slow\n");
 
-	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL, bt->phase_seg1,
+	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
+			       (bt->prop_seg + bt->phase_seg1),
 			       bt->phase_seg2, bt->sjw, bt->brp,
 			       dev->can.ctrlmode);
 	if (err)

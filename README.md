@@ -23,7 +23,7 @@ Set up interface
     modprobe can_raw
     modprobe can_dev
     insmod usb2can.ko
-    ip link set can0 up type can bitrate 125000
+    ip link set can0 up type can bitrate 1000000 sample-point 0.875
 
 
 Shut down interface
