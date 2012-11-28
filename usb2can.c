@@ -61,7 +61,7 @@
 /* setup flags */
 #define USB2CAN_SILENT			0x00000001
 #define USB2CAN_LOOPBACK		0x00000002
-#define USB2CAN_DAR_DISABLE		0x00000004
+#define USB2CAN_DISABLE_AUTO_RESTRANS	0x00000004
 #define USB2CAN_STATUS_FRAME		0x00000008
 
 /* commands */
@@ -139,7 +139,6 @@ struct usb2can_tx_urb_context {
 /* Structure to hold all of our device specific stuff */
 struct usb2can {
 	struct can_priv can; /* must be the first member */
-	int open_time;
 
 	struct sk_buff *echo_skb[MAX_TX_URBS];
 
@@ -155,6 +154,10 @@ struct usb2can {
 	u8 *cmd_msg_buffer;
 
 	unsigned int free_slots; /* remember number of available slots */
+
+	unsigned int dar; /* disable automatic restransmission */
+
+	struct mutex usb2can_cmd_lock;
 };
 
 /* tx frame */
@@ -234,6 +237,8 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
 	memcpy(&dev->cmd_msg_buffer[0], out,
 		sizeof(struct usb2can_cmd_msg));
 
+	mutex_lock(&dev->usb2can_cmd_lock);
+
 	err = usb2can_send_cmd_msg(dev, &dev->cmd_msg_buffer[0],
 				   sizeof(struct usb2can_cmd_msg));
 	if (err < 0) {
@@ -248,6 +253,8 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
 		return err;
 	}
 
+	mutex_unlock(&dev->usb2can_cmd_lock);
+
 	memcpy(in, &dev->cmd_msg_buffer[0],
 		sizeof(struct usb2can_cmd_msg));
 
@@ -261,31 +268,34 @@ static int usb2can_send_cmd(struct usb2can *dev, struct usb2can_cmd_msg *out,
 /*
  * Send open command to device
  */
-static int usb2can_cmd_open(struct usb2can *dev, u8 speed, u8 tseg1, u8 tseg2,
-			    u8 sjw, u16 brp, u32 ctrlmode)
+static int usb2can_cmd_open(struct usb2can *dev)
 {
+	struct can_bittiming *bt = &dev->can.bittiming;
 	struct usb2can_cmd_msg	outmsg;
 	struct usb2can_cmd_msg	inmsg;
 	u32 flags = 0x00000000;
 	u32 beflags;
 	u16 bebrp;
+	u32 ctrlmode = dev->can.ctrlmode;
 
 	if (ctrlmode & CAN_CTRLMODE_LOOPBACK)
 		flags |= USB2CAN_LOOPBACK;
 	if (ctrlmode & CAN_CTRLMODE_LISTENONLY)
 		flags |= USB2CAN_SILENT;
+	if (dev->dar == 1)
+		flags |= USB2CAN_DISABLE_AUTO_RESTRANS;
 
 	flags |= USB2CAN_STATUS_FRAME;
 
 	memset(&outmsg, 0, sizeof(struct usb2can_cmd_msg));
 	outmsg.command = USB2CAN_OPEN;
-	outmsg.opt1    = speed;
-	outmsg.data[0] = tseg1;
-	outmsg.data[1] = tseg2;
-	outmsg.data[2] = sjw;
+	outmsg.opt1    = USB2CAN_BAUD_MANUAL;
+	outmsg.data[0] = (u8) (bt->prop_seg + bt->phase_seg1);
+	outmsg.data[1] = (u8) bt->phase_seg2;
+	outmsg.data[2] = (u8) bt->sjw;
 
 	// BRP
-	bebrp = cpu_to_be16(brp);
+	bebrp = cpu_to_be16((u16) bt->brp);
 	memcpy(&outmsg.data[3], &bebrp, sizeof(bebrp));
 
 	// flags
@@ -385,6 +395,44 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr, ch
 }
 
 /*
+ * Get status
+ *
+ * Returns:
+ * STATUS_NONE		0x00000000
+ * STATUS_BUS_OFF	0x80000000
+ * STATUS_PASSIVE	0x40000000
+ * STATUS_BUS_WARN	0x20000000
+ * STATUS_ACTIVE	0x10000000
+ * STATUS_PHY_FAULT	0x08000000
+ * STATUS_PHY_H		0x04000000
+ * STATUS_PHY_L		0x02000000
+ * STATUS_SLEEPING	0x01000000
+ * STATUS_STOPPED	0x00800000
+ */
+static ssize_t show_status(struct device *d, struct device_attribute *attr, char *buf)
+{
+	struct usb2can_cmd_msg	outmsg;
+	struct usb2can_cmd_msg	inmsg;
+	int err = 0;
+	u32 *value;
+	u32 result;
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	memset(&outmsg, 0, sizeof(struct usb2can_cmd_msg));
+	outmsg.command = USB2CAN_GET_STATUS;
+
+	err = usb2can_send_cmd(dev, &outmsg, &inmsg);
+	if (err)
+		return -EIO;
+
+	value = (u32 *) inmsg.data;
+	result = be32_to_cpu(*value);
+
+	return sprintf(buf, "0x%08x\n", result);
+}
+
+/*
  * Get statistic values
  */
 static ssize_t show_statistics(struct device *d, struct device_attribute *attr, u8 statistic, char *buf)
@@ -470,8 +518,45 @@ static ssize_t reset_statistics(struct device *d, struct device_attribute *attr,
 	return count;
 }
 
+/*
+ * Get "disable automatic retransmission" flag
+ */
+static ssize_t show_dar(struct device *d, struct device_attribute *attr, char *buf)
+{
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	return sprintf(buf, "%d\n", dev->dar);
+}
+
+/*
+ * Set "disable automatic retransmission" flag
+ */
+static ssize_t set_dar(struct device *d, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct usb_interface *intf = to_usb_interface(d);
+	struct usb2can *dev = usb_get_intfdata(intf);
+
+	if (dev->can.state != CAN_STATE_STOPPED) {
+		dev_err(&intf->dev,
+			"DAR flag can only be set when device is stopped\n");
+		return -EIO;
+	}
+
+	if (buf[0] == '0') {
+		dev->dar = 0;
+	} else if (buf[0] == '1') {
+		dev->dar = 1;
+	} else {
+		return -EIO;
+	}
+
+	return count;
+}
+
 static DEVICE_ATTR(firmware, S_IRUGO, show_firmware, NULL);
 static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
+static DEVICE_ATTR(can_state, S_IRUGO, show_status, NULL);
 static DEVICE_ATTR(can_rx_frames, S_IRUGO, show_rx_frames, NULL);
 static DEVICE_ATTR(can_rx_bytes, S_IRUGO, show_rx_bytes, NULL);
 static DEVICE_ATTR(can_tx_frames, S_IRUGO, show_tx_frames, NULL);
@@ -482,6 +567,8 @@ static DEVICE_ATTR(can_bus_off_counter, S_IRUGO, show_bus_off, NULL);
 
 static DEVICE_ATTR(can_reset_statistics, S_IWUSR, NULL, reset_statistics);
 
+static DEVICE_ATTR(can_disable_automatic_retransmission, S_IRUGO | S_IWUSR, show_dar, set_dar);
+
 /*
  * Set network device mode
  *
@@ -491,18 +578,11 @@ static DEVICE_ATTR(can_reset_statistics, S_IWUSR, NULL, reset_statistics);
 static int usb2can_set_mode(struct net_device *netdev, enum can_mode mode)
 {
 	struct usb2can *dev = netdev_priv(netdev);
-	struct can_bittiming *bt = &dev->can.bittiming;
 	int err = 0;
-
-	if (!dev->open_time)
-		return -EINVAL;
 
 	switch (mode) {
 	case CAN_MODE_START:
-		err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
-				(bt->prop_seg + bt->phase_seg1),
-				bt->phase_seg2, bt->sjw, bt->brp,
-				dev->can.ctrlmode);
+		err = usb2can_cmd_open(dev);
 		if (err)
 			dev_warn(netdev->dev.parent, "couldn't start device");
 
@@ -910,7 +990,6 @@ static int usb2can_start(struct usb2can *dev)
 {
 	struct net_device *netdev = dev->netdev;
 	int err, i;
-	struct can_bittiming *bt = &dev->can.bittiming;
 
 	dev->free_slots = 15; /* initial size */
 
@@ -966,10 +1045,7 @@ static int usb2can_start(struct usb2can *dev)
 	if (i < MAX_RX_URBS)
 		dev_warn(netdev->dev.parent, "rx performance may be slow\n");
 
-	err = usb2can_cmd_open(dev, USB2CAN_BAUD_MANUAL,
-			       (bt->prop_seg + bt->phase_seg1),
-			       bt->phase_seg2, bt->sjw, bt->brp,
-			       dev->can.ctrlmode);
+	err = usb2can_cmd_open(dev);
 	if (err)
 		goto failed;
 
@@ -1013,8 +1089,6 @@ static int usb2can_open(struct net_device *netdev)
 		return err;
 	}
 
-	dev->open_time = jiffies;
-
 	netif_start_queue(netdev);
 
 	return 0;
@@ -1054,8 +1128,6 @@ static int usb2can_close(struct net_device *netdev)
 	netif_stop_queue(netdev);
 
 	close_candev(netdev);
-
-	dev->open_time = 0;
 
 	return err;
 }
@@ -1114,6 +1186,8 @@ static int usb2can_probe(struct usb_interface *intf,
 	dev->udev = usbdev;
 	dev->netdev = netdev;
 
+	dev->dar = 0;
+
 	dev->can.state = CAN_STATE_STOPPED;
 	dev->can.clock.freq = USB2CAN_ABP_CLOCK;
 	dev->can.bittiming_const = &usb2can_bittiming_const;
@@ -1145,6 +1219,8 @@ static int usb2can_probe(struct usb_interface *intf,
 
 	SET_NETDEV_DEV(netdev, &intf->dev);
 
+	mutex_init(&dev->usb2can_cmd_lock);
+
 	err = usb2can_cmd_version(dev, &version);
 	if (err) {
 		dev_err(netdev->dev.parent, "can't get firmware version\n");
@@ -1170,6 +1246,10 @@ static int usb2can_probe(struct usb_interface *intf,
 	if (device_create_file(&intf->dev, &dev_attr_hardware))
 		dev_err(&intf->dev,
 			"Couldn't create device file for hardware\n");
+
+	if (device_create_file(&intf->dev, &dev_attr_can_state))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_state\n");
 
 	if (device_create_file(&intf->dev, &dev_attr_can_rx_frames))
 		dev_err(&intf->dev,
@@ -1203,6 +1283,10 @@ static int usb2can_probe(struct usb_interface *intf,
 		dev_err(&intf->dev,
 			"Couldn't create device file for can_reset_statistics\n");
 
+	if (device_create_file(&intf->dev, &dev_attr_can_disable_automatic_retransmission))
+		dev_err(&intf->dev,
+			"Couldn't create device file for can_disable_automatic_retransmission\n");
+
 	/* let the user know what node this device is now attached to */
 	dev_info(netdev->dev.parent, "device registered as %s\n", netdev->name);
 	return 0;
@@ -1226,6 +1310,7 @@ static void usb2can_disconnect(struct usb_interface *intf)
 
 	device_remove_file(&intf->dev, &dev_attr_firmware);
 	device_remove_file(&intf->dev, &dev_attr_hardware);
+	device_remove_file(&intf->dev, &dev_attr_can_state);
 	device_remove_file(&intf->dev, &dev_attr_can_rx_frames);
 	device_remove_file(&intf->dev, &dev_attr_can_rx_bytes);
 	device_remove_file(&intf->dev, &dev_attr_can_tx_frames);
@@ -1234,6 +1319,7 @@ static void usb2can_disconnect(struct usb_interface *intf)
 	device_remove_file(&intf->dev, &dev_attr_can_warnings);
 	device_remove_file(&intf->dev, &dev_attr_can_bus_off_counter);
 	device_remove_file(&intf->dev, &dev_attr_can_reset_statistics);
+	device_remove_file(&intf->dev, &dev_attr_can_disable_automatic_retransmission);
 
 	usb_set_intfdata(intf, NULL);
 
