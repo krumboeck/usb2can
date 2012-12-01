@@ -1341,26 +1341,7 @@ static struct usb_driver usb2can_driver = {
 	.id_table =	usb2can_table,
 };
 
-static int __init usb2can_init(void)
-{
-	int result;
-
-	/* register this driver with the USB subsystem */
-	result = usb_register(&usb2can_driver);
-	if (result)
-		err("usb_register failed. Error number %d", result);
-
-	return result;
-}
-
-static void __exit usb2can_exit(void)
-{
-	/* deregister this driver with the USB subsystem */
-	usb_deregister(&usb2can_driver);
-}
-
-module_init(usb2can_init);
-module_exit(usb2can_exit);
+module_usb_driver(usb2can_driver);
 
 MODULE_AUTHOR("Bernd Krumboeck <krumboeck@universalnet.at>");
 MODULE_DESCRIPTION("CAN driver for UAB 8 devices USB2CAN interfaces");
