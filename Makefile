@@ -1,5 +1,5 @@
 
-obj-m += usb2can.o
+obj-m += usb_8dev.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
