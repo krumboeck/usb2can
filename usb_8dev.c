@@ -200,14 +200,16 @@ static int usb_8dev_send_cmd_msg(struct usb_8dev *dev, u8 *msg, int size)
 {
 	int actual_length;
 
-	return usb_bulk_msg(dev->udev, usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_TX),
+	return usb_bulk_msg(dev->udev,
+			    usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_TX),
 			    msg, size, &actual_length, USB_8DEV_CMD_TIMEOUT);
 }
 
 static int usb_8dev_wait_cmd_msg(struct usb_8dev *dev, u8 *msg, int size,
 				int *actual_length)
 {
-	return usb_bulk_msg(dev->udev, usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_RX),
+	return usb_bulk_msg(dev->udev,
+			    usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_RX),
 			    msg, size, actual_length, USB_8DEV_CMD_TIMEOUT);
 }
 
@@ -299,11 +301,13 @@ static int usb_8dev_cmd_open(struct usb_8dev *dev)
 /* Send close command to device */
 static int usb_8dev_cmd_close(struct usb_8dev *dev)
 {
-	struct usb_8dev_cmd_msg outmsg;
 	struct usb_8dev_cmd_msg inmsg;
-
-	memset(&outmsg, 0, sizeof(struct usb_8dev_cmd_msg));
-	outmsg.command = USB_8DEV_CLOSE;
+	struct usb_8dev_cmd_msg outmsg = {
+		.channel = 0,
+		.command = USB_8DEV_CLOSE,
+		.opt1 = 0,
+		.opt2 = 0
+		};
 
 	return usb_8dev_send_cmd(dev, &outmsg, &inmsg);
 }
@@ -311,14 +315,15 @@ static int usb_8dev_cmd_close(struct usb_8dev *dev)
 /* Get firmware and hardware version */
 static int usb_8dev_cmd_version(struct usb_8dev *dev, u32 *res)
 {
-	struct usb_8dev_cmd_msg	outmsg;
 	struct usb_8dev_cmd_msg	inmsg;
-	int err = 0;
+	struct usb_8dev_cmd_msg	outmsg = {
+		.channel = 0,
+		.command = USB_8DEV_GET_SOFTW_HARDW_VER,
+		.opt1 = 0,
+		.opt2 = 0
+		};
 
-	memset(&outmsg, 0, sizeof(struct usb_8dev_cmd_msg));
-	outmsg.command = USB_8DEV_GET_SOFTW_HARDW_VER;
-
-	err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
 	if (err)
 		return err;
 
@@ -331,17 +336,18 @@ static int usb_8dev_cmd_version(struct usb_8dev *dev, u32 *res)
 static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 			     char *buf)
 {
-	struct usb_8dev_cmd_msg outmsg;
-	struct usb_8dev_cmd_msg inmsg;
-	int err = 0;
-	u16 result;
 	struct usb_interface *intf = to_usb_interface(d);
 	struct usb_8dev *dev = usb_get_intfdata(intf);
+	u16 result;
+	struct usb_8dev_cmd_msg inmsg;
+	struct usb_8dev_cmd_msg outmsg = {
+		.channel = 0,
+		.command = USB_8DEV_GET_SOFTW_VER,
+		.opt1 = 0,
+		.opt2 = 0
+		};
 
-	memset(&outmsg, 0, sizeof(struct usb_8dev_cmd_msg));
-	outmsg.command = USB_8DEV_GET_SOFTW_VER;
-
-	err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
 	if (err)
 		return -EIO;
 
@@ -354,17 +360,18 @@ static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 			     char *buf)
 {
-	struct usb_8dev_cmd_msg outmsg;
-	struct usb_8dev_cmd_msg inmsg;
-	int err = 0;
-	u16 result;
 	struct usb_interface *intf = to_usb_interface(d);
 	struct usb_8dev *dev = usb_get_intfdata(intf);
+	u16 result;
+	struct usb_8dev_cmd_msg inmsg;
+	struct usb_8dev_cmd_msg outmsg = {
+		.channel = 0,
+		.command = USB_8DEV_GET_HARDW_VER,
+		.opt1 = 0,
+		.opt2 = 0
+		};
 
-	memset(&outmsg, 0, sizeof(struct usb_8dev_cmd_msg));
-	outmsg.command = USB_8DEV_GET_HARDW_VER;
-
-	err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
 	if (err)
 		return -EIO;
 
@@ -592,7 +599,8 @@ static void usb_8dev_read_bulk_callback(struct urb *urb)
 	}
 
 resubmit_urb:
-	usb_fill_bulk_urb(urb, dev->udev, usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_RX),
+	usb_fill_bulk_urb(urb, dev->udev,
+			  usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_RX),
 			  urb->transfer_buffer, RX_BUFFER_SIZE,
 			  usb_8dev_read_bulk_callback, dev);
 
@@ -719,8 +727,9 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 	context->echo_index = i;
 	context->dlc = cf->can_dlc;
 
-	usb_fill_bulk_urb(urb, dev->udev, usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_TX), buf,
-			  size, usb_8dev_write_bulk_callback, context);
+	usb_fill_bulk_urb(urb, dev->udev,
+			  usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_TX),
+			  buf, size, usb_8dev_write_bulk_callback, context);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &dev->tx_submitted);
 
@@ -806,7 +815,9 @@ static int usb_8dev_start(struct usb_8dev *dev)
 			return -ENOMEM;
 		}
 
-		usb_fill_bulk_urb(urb, dev->udev, usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_RX),
+		usb_fill_bulk_urb(urb, dev->udev,
+				  usb_rcvbulkpipe(dev->udev,
+						  USB_8DEV_ENDP_DATA_RX),
 				  buf, RX_BUFFER_SIZE,
 				  usb_8dev_read_bulk_callback, dev);
 		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
@@ -926,7 +937,7 @@ static const struct net_device_ops usb_8dev_netdev_ops = {
 	.ndo_start_xmit = usb_8dev_start_xmit,
 };
 
-static struct can_bittiming_const usb_8dev_bittiming_const = {
+static const struct can_bittiming_const usb_8dev_bittiming_const = {
 	.name = "usb_8dev",
 	.tseg1_min = USB_8DEV_TSEG1_MIN,
 	.tseg1_max = USB_8DEV_TSEG1_MAX,
