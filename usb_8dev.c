@@ -453,8 +453,6 @@ static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
 		if (!skb)
 			return;
 
-		dev->can.can_stats.bus_error++;
-
 		switch (state) {
 		case USB_8DEV_STATUSMSG_OK:
 			dev->can.state = CAN_STATE_ERROR_ACTIVE;
@@ -475,6 +473,7 @@ static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
 		default:
 			dev->can.state = CAN_STATE_ERROR_WARNING;
 			cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+			dev->can.can_stats.bus_error++;
 			break;
 		}
 
@@ -521,9 +520,6 @@ static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
 				CAN_ERR_CRTL_TX_PASSIVE :
 				CAN_ERR_CRTL_RX_PASSIVE;
 			dev->can.can_stats.error_passive++;
-			break;
-		default:
-			cf->data[2] |= CAN_ERR_PROT_UNSPEC;
 			break;
 		}
 
