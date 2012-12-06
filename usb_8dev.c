@@ -234,7 +234,7 @@ static int usb_8dev_send_cmd(struct usb_8dev_priv *priv,
 				    sizeof(struct usb_8dev_cmd_msg));
 	if (err < 0) {
 		netdev_err(netdev, "sending command message failed\n");
-		return err;
+		goto failed;
 	}
 
 	err = usb_8dev_wait_cmd_msg(priv, priv->cmd_msg_buffer,
@@ -242,18 +242,18 @@ static int usb_8dev_send_cmd(struct usb_8dev_priv *priv,
 				    &num_bytes_read);
 	if (err < 0) {
 		netdev_err(netdev, "no command message answer\n");
-		return err;
+		goto failed;
 	}
 
 	memcpy(in, priv->cmd_msg_buffer, sizeof(struct usb_8dev_cmd_msg));
 
-	mutex_unlock(&priv->usb_8dev_cmd_lock);
-
 	if (in->begin != USB_8DEV_CMD_START || in->end != USB_8DEV_CMD_END ||
 			num_bytes_read != 16 || in->opt1 != 0)
-		return -EPROTO;
+		err = -EPROTO;
 
-	return 0;
+failed:
+	mutex_unlock(&priv->usb_8dev_cmd_lock);
+	return err;
 }
 
 /* Send open command to device */
