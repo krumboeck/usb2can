@@ -13,8 +13,7 @@
  * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * with this program.
  *
  * This driver is inspired by the 3.2.0 version of drivers/net/can/usb/ems_usb.c
  * and drivers/net/can/usb/esd_usb2.c
@@ -130,14 +129,14 @@ static const struct usb_device_id usb_8dev_table[] = {
 MODULE_DEVICE_TABLE(usb, usb_8dev_table);
 
 struct usb_8dev_tx_urb_context {
-	struct usb_8dev *dev;
+	struct usb_8dev_priv *priv;
 
 	u32 echo_index;
 	u8 dlc;
 };
 
 /* Structure to hold all of our device specific stuff */
-struct usb_8dev {
+struct usb_8dev_priv {
 	struct can_priv can; /* must be the first member */
 
 	struct sk_buff *echo_skb[MAX_TX_URBS];
@@ -154,8 +153,6 @@ struct usb_8dev {
 	struct can_berr_counter bec;
 
 	u8 *cmd_msg_buffer;
-
-	unsigned int free_slots; /* remember number of available slots */
 
 	struct mutex usb_8dev_cmd_lock;
 
@@ -194,22 +191,20 @@ struct __packed usb_8dev_cmd_msg {
 	u8 end;
 };
 
-static struct usb_driver usb_8dev_driver;
-
-static int usb_8dev_send_cmd_msg(struct usb_8dev *dev, u8 *msg, int size)
+static int usb_8dev_send_cmd_msg(struct usb_8dev_priv *priv, u8 *msg, int size)
 {
 	int actual_length;
 
-	return usb_bulk_msg(dev->udev,
-			    usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_TX),
+	return usb_bulk_msg(priv->udev,
+			    usb_sndbulkpipe(priv->udev, USB_8DEV_ENDP_CMD_TX),
 			    msg, size, &actual_length, USB_8DEV_CMD_TIMEOUT);
 }
 
-static int usb_8dev_wait_cmd_msg(struct usb_8dev *dev, u8 *msg, int size,
+static int usb_8dev_wait_cmd_msg(struct usb_8dev_priv *priv, u8 *msg, int size,
 				int *actual_length)
 {
-	return usb_bulk_msg(dev->udev,
-			    usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_CMD_RX),
+	return usb_bulk_msg(priv->udev,
+			    usb_rcvbulkpipe(priv->udev, USB_8DEV_ENDP_CMD_RX),
 			    msg, size, actual_length, USB_8DEV_CMD_TIMEOUT);
 }
 
@@ -217,31 +212,32 @@ static int usb_8dev_wait_cmd_msg(struct usb_8dev *dev, u8 *msg, int size,
  * Send command to device and receive result.
  * Command was successful when opt1 = 0.
  */
-static int usb_8dev_send_cmd(struct usb_8dev *dev, struct usb_8dev_cmd_msg *out,
-			    struct usb_8dev_cmd_msg *in)
+static int usb_8dev_send_cmd(struct usb_8dev_priv *priv,
+			     struct usb_8dev_cmd_msg *out,
+			     struct usb_8dev_cmd_msg *in)
 {
 	int err;
 	int num_bytes_read;
 	struct net_device *netdev;
 
-	netdev = dev->netdev;
+	netdev = priv->netdev;
 
 	out->begin = USB_8DEV_CMD_START;
 	out->end = USB_8DEV_CMD_END;
 
-	mutex_lock(&dev->usb_8dev_cmd_lock);
+	mutex_lock(&priv->usb_8dev_cmd_lock);
 
-	memcpy(dev->cmd_msg_buffer, out,
+	memcpy(priv->cmd_msg_buffer, out,
 		sizeof(struct usb_8dev_cmd_msg));
 
-	err = usb_8dev_send_cmd_msg(dev, dev->cmd_msg_buffer,
+	err = usb_8dev_send_cmd_msg(priv, priv->cmd_msg_buffer,
 				    sizeof(struct usb_8dev_cmd_msg));
 	if (err < 0) {
 		netdev_err(netdev, "sending command message failed\n");
 		return err;
 	}
 
-	err = usb_8dev_wait_cmd_msg(dev, dev->cmd_msg_buffer,
+	err = usb_8dev_wait_cmd_msg(priv, priv->cmd_msg_buffer,
 				    sizeof(struct usb_8dev_cmd_msg),
 				    &num_bytes_read);
 	if (err < 0) {
@@ -249,9 +245,9 @@ static int usb_8dev_send_cmd(struct usb_8dev *dev, struct usb_8dev_cmd_msg *out,
 		return err;
 	}
 
-	memcpy(in, dev->cmd_msg_buffer, sizeof(struct usb_8dev_cmd_msg));
+	memcpy(in, priv->cmd_msg_buffer, sizeof(struct usb_8dev_cmd_msg));
 
-	mutex_unlock(&dev->usb_8dev_cmd_lock);
+	mutex_unlock(&priv->usb_8dev_cmd_lock);
 
 	if (in->begin != USB_8DEV_CMD_START || in->end != USB_8DEV_CMD_END ||
 			num_bytes_read != 16 || in->opt1 != 0)
@@ -261,15 +257,15 @@ static int usb_8dev_send_cmd(struct usb_8dev *dev, struct usb_8dev_cmd_msg *out,
 }
 
 /* Send open command to device */
-static int usb_8dev_cmd_open(struct usb_8dev *dev)
+static int usb_8dev_cmd_open(struct usb_8dev_priv *priv)
 {
-	struct can_bittiming *bt = &dev->can.bittiming;
+	struct can_bittiming *bt = &priv->can.bittiming;
 	struct usb_8dev_cmd_msg outmsg;
 	struct usb_8dev_cmd_msg inmsg;
 	u32 flags = 0;
 	u32 beflags;
 	u16 bebrp;
-	u32 ctrlmode = dev->can.ctrlmode;
+	u32 ctrlmode = priv->can.ctrlmode;
 
 	if (ctrlmode & CAN_CTRLMODE_LOOPBACK)
 		flags |= USB_8DEV_LOOPBACK;
@@ -280,26 +276,26 @@ static int usb_8dev_cmd_open(struct usb_8dev *dev)
 
 	flags |= USB_8DEV_STATUS_FRAME;
 
-	memset(&outmsg, 0, sizeof(struct usb_8dev_cmd_msg));
+	memset(&outmsg, 0, sizeof(outmsg));
 	outmsg.command = USB_8DEV_OPEN;
 	outmsg.opt1 = USB_8DEV_BAUD_MANUAL;
-	outmsg.data[0] = (bt->prop_seg + bt->phase_seg1);
+	outmsg.data[0] = bt->prop_seg + bt->phase_seg1;
 	outmsg.data[1] = bt->phase_seg2;
 	outmsg.data[2] = bt->sjw;
 
 	/* BRP */
-	bebrp = cpu_to_be16((u16) bt->brp);
+	bebrp = cpu_to_be16((u16)bt->brp);
 	memcpy(&outmsg.data[3], &bebrp, sizeof(bebrp));
 
 	/* flags */
 	beflags = cpu_to_be32(flags);
 	memcpy(&outmsg.data[5], &beflags, sizeof(beflags));
 
-	return usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	return usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 }
 
 /* Send close command to device */
-static int usb_8dev_cmd_close(struct usb_8dev *dev)
+static int usb_8dev_cmd_close(struct usb_8dev_priv *priv)
 {
 	struct usb_8dev_cmd_msg inmsg;
 	struct usb_8dev_cmd_msg outmsg = {
@@ -309,11 +305,11 @@ static int usb_8dev_cmd_close(struct usb_8dev *dev)
 		.opt2 = 0
 		};
 
-	return usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	return usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 }
 
 /* Get firmware and hardware version */
-static int usb_8dev_cmd_version(struct usb_8dev *dev, u32 *res)
+static int usb_8dev_cmd_version(struct usb_8dev_priv *priv, u32 *res)
 {
 	struct usb_8dev_cmd_msg	inmsg;
 	struct usb_8dev_cmd_msg	outmsg = {
@@ -323,11 +319,11 @@ static int usb_8dev_cmd_version(struct usb_8dev *dev, u32 *res)
 		.opt2 = 0
 		};
 
-	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
 		return err;
 
-	*res = be32_to_cpu(*(u32 *)inmsg.data);
+	*res = be32_to_cpup((u32 *)inmsg.data);
 
 	return err;
 }
@@ -337,7 +333,7 @@ static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 			     char *buf)
 {
 	struct usb_interface *intf = to_usb_interface(d);
-	struct usb_8dev *dev = usb_get_intfdata(intf);
+	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
 	u16 result;
 	struct usb_8dev_cmd_msg inmsg;
 	struct usb_8dev_cmd_msg outmsg = {
@@ -347,11 +343,11 @@ static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 		.opt2 = 0
 		};
 
-	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
 		return -EIO;
 
-	result = be16_to_cpu(*(u16 *)inmsg.data);
+	result = be16_to_cpup((u16 *)inmsg.data);
 
 	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
 }
@@ -361,7 +357,7 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 			     char *buf)
 {
 	struct usb_interface *intf = to_usb_interface(d);
-	struct usb_8dev *dev = usb_get_intfdata(intf);
+	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
 	u16 result;
 	struct usb_8dev_cmd_msg inmsg;
 	struct usb_8dev_cmd_msg outmsg = {
@@ -371,11 +367,11 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 		.opt2 = 0
 		};
 
-	int err = usb_8dev_send_cmd(dev, &outmsg, &inmsg);
+	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
 		return -EIO;
 
-	result = be16_to_cpu(*(u16 *)inmsg.data);
+	result = be16_to_cpup((u16 *)inmsg.data);
 
 	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
 }
@@ -391,12 +387,12 @@ static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
  */
 static int usb_8dev_set_mode(struct net_device *netdev, enum can_mode mode)
 {
-	struct usb_8dev *dev = netdev_priv(netdev);
+	struct usb_8dev_priv *priv = netdev_priv(netdev);
 	int err = 0;
 
 	switch (mode) {
 	case CAN_MODE_START:
-		err = usb_8dev_cmd_open(dev);
+		err = usb_8dev_cmd_open(priv);
 		if (err)
 			netdev_warn(netdev, "couldn't start device");
 		break;
@@ -405,19 +401,139 @@ static int usb_8dev_set_mode(struct net_device *netdev, enum can_mode mode)
 		return -EOPNOTSUPP;
 	}
 
-	return 0;
+	return err;
 }
 
-/* Read data and status frames */
-static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
+/* Read error/status frames */
+static void usb_8dev_rx_err_msg(struct usb_8dev_priv *priv,
 				struct usb_8dev_rx_msg *msg)
 {
 	struct can_frame *cf;
 	struct sk_buff *skb;
-	struct net_device_stats *stats = &dev->netdev->stats;
+	struct net_device_stats *stats = &priv->netdev->stats;
+
+	/*
+	 * Error message:
+	 * byte 0: Status
+	 * byte 1: bit   7: Receive Passive
+	 * byte 1: bit 0-6: Receive Error Counter
+	 * byte 2: Transmit Error Counter
+	 * byte 3: Always 0 (maybe reserved for future use)
+	 */
+
+	u8 state = msg->data[0];
+	u8 rxerr = msg->data[1] & USB_8DEV_RP_MASK;
+	u8 txerr = msg->data[2];
+	int rx_errors = 0;
+	int tx_errors = 0;
+
+	skb = alloc_can_err_skb(priv->netdev, &cf);
+	if (!skb)
+		return;
+
+	switch (state) {
+	case USB_8DEV_STATUSMSG_OK:
+		priv->can.state = CAN_STATE_ERROR_ACTIVE;
+		cf->can_id |= CAN_ERR_PROT;
+		cf->data[2] = CAN_ERR_PROT_ACTIVE;
+		break;
+	case USB_8DEV_STATUSMSG_BUSOFF:
+		priv->can.state = CAN_STATE_BUS_OFF;
+		cf->can_id |= CAN_ERR_BUSOFF;
+		can_bus_off(priv->netdev);
+		break;
+	case USB_8DEV_STATUSMSG_OVERRUN:
+	case USB_8DEV_STATUSMSG_BUSLIGHT:
+	case USB_8DEV_STATUSMSG_BUSHEAVY:
+		cf->can_id |= CAN_ERR_CRTL;
+		break;
+	default:
+		priv->can.state = CAN_STATE_ERROR_WARNING;
+		cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+		priv->can.can_stats.bus_error++;
+		break;
+	}
+
+	switch (state) {
+	case USB_8DEV_STATUSMSG_ACK:
+		cf->can_id |= CAN_ERR_ACK;
+		tx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_CRC:
+		cf->data[2] |= CAN_ERR_PROT_BIT;
+		rx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_BIT0:
+		cf->data[2] |= CAN_ERR_PROT_BIT0;
+		tx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_BIT1:
+		cf->data[2] |= CAN_ERR_PROT_BIT1;
+		tx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_FORM:
+		cf->data[2] |= CAN_ERR_PROT_FORM;
+		rx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_STUFF:
+		cf->data[2] |= CAN_ERR_PROT_STUFF;
+		rx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_OVERRUN:
+		cf->data[1] = CAN_ERR_CRTL_RX_OVERFLOW;
+		stats->rx_over_errors++;
+		rx_errors = 1;
+		break;
+	case USB_8DEV_STATUSMSG_BUSLIGHT:
+		priv->can.state = CAN_STATE_ERROR_WARNING;
+		cf->data[1] = (txerr > rxerr) ?
+			CAN_ERR_CRTL_TX_WARNING :
+			CAN_ERR_CRTL_RX_WARNING;
+		priv->can.can_stats.error_warning++;
+		break;
+	case USB_8DEV_STATUSMSG_BUSHEAVY:
+		priv->can.state = CAN_STATE_ERROR_WARNING;
+		cf->data[1] = (txerr > rxerr) ?
+			CAN_ERR_CRTL_TX_PASSIVE :
+			CAN_ERR_CRTL_RX_PASSIVE;
+		priv->can.can_stats.error_passive++;
+		break;
+	default:
+		netdev_warn(priv->netdev,
+			    "Unknown status/error message (%d)\n", state);
+		break;
+	}
+
+	if (tx_errors) {
+		cf->data[2] |= CAN_ERR_PROT_TX;
+		stats->tx_errors++;
+	}
+
+	if (rx_errors)
+		stats->rx_errors++;
+
+	cf->data[6] = txerr;
+	cf->data[7] = rxerr;
+
+	priv->bec.txerr = txerr;
+	priv->bec.rxerr = rxerr;
+
+	netif_rx(skb);
+
+	stats->rx_packets++;
+	stats->rx_bytes += cf->can_dlc;
+}
+
+/* Read data and status frames */
+static void usb_8dev_rx_can_msg(struct usb_8dev_priv *priv,
+				struct usb_8dev_rx_msg *msg)
+{
+	struct can_frame *cf;
+	struct sk_buff *skb;
+	struct net_device_stats *stats = &priv->netdev->stats;
 
 	if (msg->type == USB_8DEV_TYPE_CAN_FRAME) {
-		skb = alloc_can_skb(dev->netdev, &cf);
+		skb = alloc_can_skb(priv->netdev, &cf);
 		if (!skb)
 			return;
 
@@ -431,122 +547,19 @@ static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
 			cf->can_id |= CAN_RTR_FLAG;
 		else
 			memcpy(cf->data, msg->data, cf->can_dlc);
+
+		netif_rx(skb);
+
+		stats->rx_packets++;
+		stats->rx_bytes += cf->can_dlc;
 	} else if (msg->type == USB_8DEV_TYPE_ERROR_FRAME &&
 		   msg->flags == USB_8DEV_ERR_FLAG) {
-
-		/*
-		 * Error message:
-		 * byte 0: Status
-		 * byte 1: bit   7: Receive Passive
-		 * byte 1: bit 0-6: Receive Error Counter
-		 * byte 2: Transmit Error Counter
-		 * byte 3: Always 0 (maybe reserved for future use)
-		 */
-
-		u8 state = msg->data[0];
-		u8 rxerr = msg->data[1] & USB_8DEV_RP_MASK;
-		u8 txerr = msg->data[2];
-		int rx_errors = 0;
-		int tx_errors = 0;
-
-		skb = alloc_can_err_skb(dev->netdev, &cf);
-		if (!skb)
-			return;
-
-		switch (state) {
-		case USB_8DEV_STATUSMSG_OK:
-			dev->can.state = CAN_STATE_ERROR_ACTIVE;
-			cf->can_id |= CAN_ERR_PROT;
-			cf->data[2] = CAN_ERR_PROT_ACTIVE;
-			break;
-		case USB_8DEV_STATUSMSG_BUSOFF:
-			dev->can.state = CAN_STATE_BUS_OFF;
-			cf->can_id |= CAN_ERR_BUSOFF;
-			can_bus_off(dev->netdev);
-			break;
-		case USB_8DEV_STATUSMSG_OVERRUN:
-		case USB_8DEV_STATUSMSG_BUSLIGHT:
-		case USB_8DEV_STATUSMSG_BUSHEAVY:
-			dev->can.state = CAN_STATE_ERROR_WARNING;
-			cf->can_id |= CAN_ERR_CRTL;
-			break;
-		default:
-			dev->can.state = CAN_STATE_ERROR_WARNING;
-			cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
-			dev->can.can_stats.bus_error++;
-			break;
-		}
-
-		switch (state) {
-		case USB_8DEV_STATUSMSG_ACK:
-			cf->can_id |= CAN_ERR_ACK;
-			tx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_CRC:
-			cf->data[2] |= CAN_ERR_PROT_BIT;
-			rx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_BIT0:
-			cf->data[2] |= CAN_ERR_PROT_BIT0;
-			tx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_BIT1:
-			cf->data[2] |= CAN_ERR_PROT_BIT1;
-			tx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_FORM:
-			cf->data[2] |= CAN_ERR_PROT_FORM;
-			rx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_STUFF:
-			cf->data[2] |= CAN_ERR_PROT_STUFF;
-			rx_errors = 1;
-			break;
-		case USB_8DEV_STATUSMSG_OVERRUN:
-			cf->data[1] = (txerr > rxerr) ?
-				CAN_ERR_CRTL_TX_OVERFLOW :
-				CAN_ERR_CRTL_RX_OVERFLOW;
-			cf->data[2] |= CAN_ERR_PROT_OVERLOAD;
-			stats->rx_over_errors++;
-			break;
-		case USB_8DEV_STATUSMSG_BUSLIGHT:
-			cf->data[1] = (txerr > rxerr) ?
-				CAN_ERR_CRTL_TX_WARNING :
-				CAN_ERR_CRTL_RX_WARNING;
-			dev->can.can_stats.error_warning++;
-			break;
-		case USB_8DEV_STATUSMSG_BUSHEAVY:
-			cf->data[1] = (txerr > rxerr) ?
-				CAN_ERR_CRTL_TX_PASSIVE :
-				CAN_ERR_CRTL_RX_PASSIVE;
-			dev->can.can_stats.error_passive++;
-			break;
-		}
-
-		if (tx_errors) {
-			cf->data[2] |= CAN_ERR_PROT_TX;
-			stats->tx_errors++;
-		}
-
-		if (rx_errors)
-			stats->rx_errors++;
-
-		cf->data[6] = txerr;
-		cf->data[7] = rxerr;
-
-		dev->bec.txerr = txerr;
-		dev->bec.rxerr = rxerr;
-
+		usb_8dev_rx_err_msg(priv, msg);
 	} else {
-		netdev_warn(dev->netdev, "frame type %d unknown",
+		netdev_warn(priv->netdev, "frame type %d unknown",
 			 msg->type);
-		return;
 	}
 
-	netif_rx(skb);
-
-	stats->rx_packets++;
-	stats->rx_bytes += cf->can_dlc;
 }
 
 /*
@@ -556,12 +569,12 @@ static void usb_8dev_rx_can_msg(struct usb_8dev *dev,
  */
 static void usb_8dev_read_bulk_callback(struct urb *urb)
 {
-	struct usb_8dev *dev = urb->context;
+	struct usb_8dev_priv *priv = urb->context;
 	struct net_device *netdev;
 	int retval;
 	int pos = 0;
 
-	netdev = dev->netdev;
+	netdev = priv->netdev;
 
 	if (!netif_device_present(netdev))
 		return;
@@ -584,21 +597,21 @@ static void usb_8dev_read_bulk_callback(struct urb *urb)
 		struct usb_8dev_rx_msg *msg;
 
 		if (pos + sizeof(struct usb_8dev_rx_msg) > urb->actual_length) {
-			netdev_err(dev->netdev, "format error\n");
+			netdev_err(priv->netdev, "format error\n");
 			break;
 		}
 
 		msg = (struct usb_8dev_rx_msg *)(urb->transfer_buffer + pos);
-		usb_8dev_rx_can_msg(dev, msg);
+		usb_8dev_rx_can_msg(priv, msg);
 
 		pos += sizeof(struct usb_8dev_rx_msg);
 	}
 
 resubmit_urb:
-	usb_fill_bulk_urb(urb, dev->udev,
-			  usb_rcvbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_RX),
+	usb_fill_bulk_urb(urb, priv->udev,
+			  usb_rcvbulkpipe(priv->udev, USB_8DEV_ENDP_DATA_RX),
 			  urb->transfer_buffer, RX_BUFFER_SIZE,
-			  usb_8dev_read_bulk_callback, dev);
+			  usb_8dev_read_bulk_callback, priv);
 
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
 
@@ -618,19 +631,19 @@ resubmit_urb:
 static void usb_8dev_write_bulk_callback(struct urb *urb)
 {
 	struct usb_8dev_tx_urb_context *context = urb->context;
-	struct usb_8dev *dev;
+	struct usb_8dev_priv *priv;
 	struct net_device *netdev;
 
 	BUG_ON(!context);
 
-	dev = context->dev;
-	netdev = dev->netdev;
+	priv = context->priv;
+	netdev = priv->netdev;
 
 	/* free up our allocated buffer */
 	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
 			  urb->transfer_buffer, urb->transfer_dma);
 
-	atomic_dec(&dev->active_tx_urbs);
+	atomic_dec(&priv->active_tx_urbs);
 
 	if (!netif_device_present(netdev))
 		return;
@@ -654,7 +667,7 @@ static void usb_8dev_write_bulk_callback(struct urb *urb)
 static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 				      struct net_device *netdev)
 {
-	struct usb_8dev *dev = netdev_priv(netdev);
+	struct usb_8dev_priv *priv = netdev_priv(netdev);
 	struct net_device_stats *stats = &netdev->stats;
 	struct can_frame *cf = (struct can_frame *) skb->data;
 	struct usb_8dev_tx_msg *msg;
@@ -674,12 +687,11 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 		goto nomem;
 	}
 
-	buf = usb_alloc_coherent(dev->udev, size, GFP_ATOMIC,
+	buf = usb_alloc_coherent(priv->udev, size, GFP_ATOMIC,
 				 &urb->transfer_dma);
 	if (!buf) {
 		netdev_err(netdev, "No memory left for USB buffer\n");
-		usb_free_urb(urb);
-		goto nomem;
+		goto nomembuf;
 	}
 
 	memset(buf, 0, size);
@@ -700,8 +712,8 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 	msg->end = USB_8DEV_DATA_END;
 
 	for (i = 0; i < MAX_TX_URBS; i++) {
-		if (dev->tx_contexts[i].echo_index == MAX_TX_URBS) {
-			context = &dev->tx_contexts[i];
+		if (priv->tx_contexts[i].echo_index == MAX_TX_URBS) {
+			context = &priv->tx_contexts[i];
 			break;
 		}
 	}
@@ -710,53 +722,29 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 	 * May never happen! When this happens we'd more URBs in flight as
 	 * allowed (MAX_TX_URBS).
 	 */
-	if (!context) {
-		usb_unanchor_urb(urb);
-		usb_free_coherent(dev->udev, size, buf, urb->transfer_dma);
+	if (!context)
+		goto nofreecontext;
 
-		netdev_warn(netdev, "couldn't find free context");
-
-		return NETDEV_TX_BUSY;
-	}
-
-	context->dev = dev;
+	context->priv = priv;
 	context->echo_index = i;
 	context->dlc = cf->can_dlc;
 
-	usb_fill_bulk_urb(urb, dev->udev,
-			  usb_sndbulkpipe(dev->udev, USB_8DEV_ENDP_DATA_TX),
+	usb_fill_bulk_urb(urb, priv->udev,
+			  usb_sndbulkpipe(priv->udev, USB_8DEV_ENDP_DATA_TX),
 			  buf, size, usb_8dev_write_bulk_callback, context);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-	usb_anchor_urb(urb, &dev->tx_submitted);
+	usb_anchor_urb(urb, &priv->tx_submitted);
 
 	can_put_echo_skb(skb, netdev, context->echo_index);
 
-	atomic_inc(&dev->active_tx_urbs);
+	atomic_inc(&priv->active_tx_urbs);
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
-	if (unlikely(err)) {
-		can_free_echo_skb(netdev, context->echo_index);
-
-		usb_unanchor_urb(urb);
-		usb_free_coherent(dev->udev, size, buf, urb->transfer_dma);
-		dev_kfree_skb(skb);
-
-		atomic_dec(&dev->active_tx_urbs);
-
-		if (err == -ENODEV) {
-			netif_device_detach(netdev);
-		} else {
-			netdev_warn(netdev, "failed tx_urb %d\n", err);
-
-			stats->tx_dropped++;
-		}
-	} else {
+	if (unlikely(err))
+		goto failed;
+	else if (atomic_read(&priv->active_tx_urbs) >= MAX_TX_URBS)
 		/* Slow down tx path */
-		if (atomic_read(&dev->active_tx_urbs) >= MAX_TX_URBS ||
-		    dev->free_slots < 5) {
-			netif_stop_queue(netdev);
-		}
-	}
+		netif_stop_queue(netdev);
 
 	/*
 	 * Release our reference to this URB, the USB core will eventually free
@@ -765,6 +753,30 @@ static netdev_tx_t usb_8dev_start_xmit(struct sk_buff *skb,
 	usb_free_urb(urb);
 
 	return NETDEV_TX_OK;
+
+nofreecontext:
+	usb_unanchor_urb(urb);
+	usb_free_coherent(priv->udev, size, buf, urb->transfer_dma);
+
+	netdev_warn(netdev, "couldn't find free context");
+
+	return NETDEV_TX_BUSY;
+
+failed:
+	can_free_echo_skb(netdev, context->echo_index);
+
+	usb_unanchor_urb(urb);
+	usb_free_coherent(priv->udev, size, buf, urb->transfer_dma);
+
+	atomic_dec(&priv->active_tx_urbs);
+
+	if (err == -ENODEV)
+		netif_device_detach(netdev);
+	else
+		netdev_warn(netdev, "failed tx_urb %d\n", err);
+
+nomembuf:
+	usb_free_urb(urb);
 
 nomem:
 	dev_kfree_skb(skb);
@@ -776,56 +788,53 @@ nomem:
 static int usb_8dev_get_berr_counter(const struct net_device *netdev,
 				     struct can_berr_counter *bec)
 {
-	struct usb_8dev *dev = netdev_priv(netdev);
+	struct usb_8dev_priv *priv = netdev_priv(netdev);
 
-	bec->txerr = dev->bec.txerr;
-	bec->rxerr = dev->bec.rxerr;
+	bec->txerr = priv->bec.txerr;
+	bec->rxerr = priv->bec.rxerr;
 
 	return 0;
 }
 
 /* Start USB device */
-static int usb_8dev_start(struct usb_8dev *dev)
+static int usb_8dev_start(struct usb_8dev_priv *priv)
 {
-	struct net_device *netdev = dev->netdev;
+	struct net_device *netdev = priv->netdev;
 	int err, i;
-
-	dev->free_slots = 15; /* initial size */
 
 	for (i = 0; i < MAX_RX_URBS; i++) {
 		struct urb *urb = NULL;
-		u8 *buf = NULL;
+		u8 *buf;
 
 		/* create a URB, and a buffer for it */
 		urb = usb_alloc_urb(0, GFP_KERNEL);
 		if (!urb) {
 			netdev_err(netdev, "No memory left for URBs\n");
-			return -ENOMEM;
+			err = -ENOMEM;
+			break;
 		}
 
-		buf = usb_alloc_coherent(dev->udev, RX_BUFFER_SIZE, GFP_KERNEL,
+		buf = usb_alloc_coherent(priv->udev, RX_BUFFER_SIZE, GFP_KERNEL,
 					 &urb->transfer_dma);
 		if (!buf) {
 			netdev_err(netdev, "No memory left for USB buffer\n");
 			usb_free_urb(urb);
-			return -ENOMEM;
+			err = -ENOMEM;
+			break;
 		}
 
-		usb_fill_bulk_urb(urb, dev->udev,
-				  usb_rcvbulkpipe(dev->udev,
+		usb_fill_bulk_urb(urb, priv->udev,
+				  usb_rcvbulkpipe(priv->udev,
 						  USB_8DEV_ENDP_DATA_RX),
 				  buf, RX_BUFFER_SIZE,
-				  usb_8dev_read_bulk_callback, dev);
+				  usb_8dev_read_bulk_callback, priv);
 		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-		usb_anchor_urb(urb, &dev->rx_submitted);
+		usb_anchor_urb(urb, &priv->rx_submitted);
 
 		err = usb_submit_urb(urb, GFP_KERNEL);
 		if (err) {
-			if (err == -ENODEV)
-				netif_device_detach(dev->netdev);
-
 			usb_unanchor_urb(urb);
-			usb_free_coherent(dev->udev, RX_BUFFER_SIZE, buf,
+			usb_free_coherent(priv->udev, RX_BUFFER_SIZE, buf,
 					  urb->transfer_dma);
 			break;
 		}
@@ -844,17 +853,17 @@ static int usb_8dev_start(struct usb_8dev *dev)
 	if (i < MAX_RX_URBS)
 		netdev_warn(netdev, "rx performance may be slow\n");
 
-	err = usb_8dev_cmd_open(dev);
+	err = usb_8dev_cmd_open(priv);
 	if (err)
 		goto failed;
 
-	dev->can.state = CAN_STATE_ERROR_ACTIVE;
+	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 
 	return 0;
 
 failed:
 	if (err == -ENODEV)
-		netif_device_detach(dev->netdev);
+		netif_device_detach(priv->netdev);
 
 	netdev_warn(netdev, "couldn't submit control: %d\n", err);
 
@@ -864,7 +873,7 @@ failed:
 /* Open USB device */
 static int usb_8dev_open(struct net_device *netdev)
 {
-	struct usb_8dev *dev = netdev_priv(netdev);
+	struct usb_8dev_priv *priv = netdev_priv(netdev);
 	int err;
 
 	/* common open */
@@ -873,10 +882,10 @@ static int usb_8dev_open(struct net_device *netdev)
 		return err;
 
 	/* finally start device */
-	err = usb_8dev_start(dev);
+	err = usb_8dev_start(priv);
 	if (err) {
 		if (err == -ENODEV)
-			netif_device_detach(dev->netdev);
+			netif_device_detach(priv->netdev);
 
 		netdev_warn(netdev, "couldn't start device: %d\n",
 			 err);
@@ -891,36 +900,36 @@ static int usb_8dev_open(struct net_device *netdev)
 	return 0;
 }
 
-static void unlink_all_urbs(struct usb_8dev *dev)
+static void unlink_all_urbs(struct usb_8dev_priv *priv)
 {
 	int i;
 
-	usb_kill_anchored_urbs(&dev->rx_submitted);
+	usb_kill_anchored_urbs(&priv->rx_submitted);
 
-	usb_kill_anchored_urbs(&dev->tx_submitted);
-	atomic_set(&dev->active_tx_urbs, 0);
+	usb_kill_anchored_urbs(&priv->tx_submitted);
+	atomic_set(&priv->active_tx_urbs, 0);
 
 	for (i = 0; i < MAX_TX_URBS; i++)
-		dev->tx_contexts[i].echo_index = MAX_TX_URBS;
+		priv->tx_contexts[i].echo_index = MAX_TX_URBS;
 }
 
 /* Close USB device */
 static int usb_8dev_close(struct net_device *netdev)
 {
-	struct usb_8dev *dev = netdev_priv(netdev);
+	struct usb_8dev_priv *priv = netdev_priv(netdev);
 	int err = 0;
 
 	/* Send CLOSE command to CAN controller */
-	err = usb_8dev_cmd_close(dev);
+	err = usb_8dev_cmd_close(priv);
 	if (err)
 		netdev_warn(netdev, "couldn't stop device");
 
-	dev->can.state = CAN_STATE_STOPPED;
-
-	/* Stop polling */
-	unlink_all_urbs(dev);
+	priv->can.state = CAN_STATE_STOPPED;
 
 	netif_stop_queue(netdev);
+
+	/* Stop polling */
+	unlink_all_urbs(priv);
 
 	close_candev(netdev);
 
@@ -956,36 +965,36 @@ static int usb_8dev_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
 {
 	struct net_device *netdev;
-	struct usb_8dev *dev;
+	struct usb_8dev_priv *priv;
 	int i, err = -ENOMEM;
 	u32 version;
 	char buf[18];
 	struct usb_device *usbdev = interface_to_usbdev(intf);
 
-	/* product id looks strange, better we also check iProdukt string */
+	/* product id looks strange, better we also check iProduct string */
 	if (usb_string(usbdev, usbdev->descriptor.iProduct, buf,
 		       sizeof(buf)) > 0 && strcmp(buf, "USB2CAN converter")) {
 		dev_info(&usbdev->dev, "ignoring: not an USB2CAN converter\n");
 		return -ENODEV;
 	}
 
-	netdev = alloc_candev(sizeof(struct usb_8dev), MAX_TX_URBS);
+	netdev = alloc_candev(sizeof(struct usb_8dev_priv), MAX_TX_URBS);
 	if (!netdev) {
 		dev_err(&intf->dev, "Couldn't alloc candev\n");
 		return -ENOMEM;
 	}
 
-	dev = netdev_priv(netdev);
+	priv = netdev_priv(netdev);
 
-	dev->udev = usbdev;
-	dev->netdev = netdev;
+	priv->udev = usbdev;
+	priv->netdev = netdev;
 
-	dev->can.state = CAN_STATE_STOPPED;
-	dev->can.clock.freq = USB_8DEV_ABP_CLOCK;
-	dev->can.bittiming_const = &usb_8dev_bittiming_const;
-	dev->can.do_set_mode = usb_8dev_set_mode;
-	dev->can.do_get_berr_counter = usb_8dev_get_berr_counter;
-	dev->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
+	priv->can.state = CAN_STATE_STOPPED;
+	priv->can.clock.freq = USB_8DEV_ABP_CLOCK;
+	priv->can.bittiming_const = &usb_8dev_bittiming_const;
+	priv->can.do_set_mode = usb_8dev_set_mode;
+	priv->can.do_get_berr_counter = usb_8dev_get_berr_counter;
+	priv->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
 				      CAN_CTRLMODE_LISTENONLY |
 				      CAN_CTRLMODE_ONE_SHOT;
 
@@ -993,28 +1002,35 @@ static int usb_8dev_probe(struct usb_interface *intf,
 
 	netdev->flags |= IFF_ECHO; /* we support local echo */
 
-	init_usb_anchor(&dev->rx_submitted);
+	init_usb_anchor(&priv->rx_submitted);
 
-	init_usb_anchor(&dev->tx_submitted);
-	atomic_set(&dev->active_tx_urbs, 0);
+	init_usb_anchor(&priv->tx_submitted);
+	atomic_set(&priv->active_tx_urbs, 0);
 
 	for (i = 0; i < MAX_TX_URBS; i++)
-		dev->tx_contexts[i].echo_index = MAX_TX_URBS;
+		priv->tx_contexts[i].echo_index = MAX_TX_URBS;
 
-	dev->cmd_msg_buffer = kzalloc(sizeof(struct usb_8dev_cmd_msg),
+	priv->cmd_msg_buffer = kzalloc(sizeof(struct usb_8dev_cmd_msg),
 				      GFP_KERNEL);
-	if (!dev->cmd_msg_buffer) {
+	if (!priv->cmd_msg_buffer) {
 		netdev_err(netdev, "Couldn't alloc Tx buffer\n");
 		goto cleanup_candev;
 	}
 
-	usb_set_intfdata(intf, dev);
+	usb_set_intfdata(intf, priv);
 
 	SET_NETDEV_DEV(netdev, &intf->dev);
 
-	mutex_init(&dev->usb_8dev_cmd_lock);
+	mutex_init(&priv->usb_8dev_cmd_lock);
 
-	err = usb_8dev_cmd_version(dev, &version);
+	err = register_candev(netdev);
+	if (err) {
+		netdev_err(netdev,
+			"couldn't register CAN device: %d\n", err);
+		goto cleanup_cmd_msg_buffer;
+	}
+
+	err = usb_8dev_cmd_version(priv, &version);
 	if (err) {
 		netdev_err(netdev, "can't get firmware version\n");
 		goto cleanup_cmd_msg_buffer;
@@ -1025,13 +1041,6 @@ static int usb_8dev_probe(struct usb_interface *intf,
 			 (version>>8) & 0xff, version & 0xff);
 	}
 
-	err = register_candev(netdev);
-	if (err) {
-		netdev_err(netdev,
-			"couldn't register CAN device: %d\n", err);
-		goto cleanup_cmd_msg_buffer;
-	}
-
 	if (device_create_file(&intf->dev, &dev_attr_firmware))
 		netdev_err(netdev,
 			"Couldn't create device file for firmware\n");
@@ -1040,12 +1049,10 @@ static int usb_8dev_probe(struct usb_interface *intf,
 		netdev_err(netdev,
 			"Couldn't create device file for hardware\n");
 
-	/* let the user know what node this device is now attached to */
-	netdev_info(netdev, "device registered as %s\n", netdev->name);
 	return 0;
 
 cleanup_cmd_msg_buffer:
-	kfree(dev->cmd_msg_buffer);
+	kfree(priv->cmd_msg_buffer);
 
 cleanup_candev:
 	free_candev(netdev);
@@ -1057,20 +1064,20 @@ cleanup_candev:
 /* Called by the usb core when driver is unloaded or device is removed */
 static void usb_8dev_disconnect(struct usb_interface *intf)
 {
-	struct usb_8dev *dev = usb_get_intfdata(intf);
+	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
 
 	device_remove_file(&intf->dev, &dev_attr_firmware);
 	device_remove_file(&intf->dev, &dev_attr_hardware);
 
 	usb_set_intfdata(intf, NULL);
 
-	if (dev) {
-		netdev_info(dev->netdev, "disconnect %s\n", dev->netdev->name);
+	if (priv) {
+		netdev_info(priv->netdev, "device disconnected\n");
 
-		unregister_netdev(dev->netdev);
-		free_candev(dev->netdev);
+		unregister_netdev(priv->netdev);
+		free_candev(priv->netdev);
 
-		unlink_all_urbs(dev);
+		unlink_all_urbs(priv);
 	}
 
 }
