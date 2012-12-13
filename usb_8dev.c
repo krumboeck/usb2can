@@ -262,19 +262,10 @@ static int usb_8dev_cmd_open(struct usb_8dev_priv *priv)
 	struct can_bittiming *bt = &priv->can.bittiming;
 	struct usb_8dev_cmd_msg outmsg;
 	struct usb_8dev_cmd_msg inmsg;
-	u32 flags = 0;
-	u32 beflags;
-	u16 bebrp;
 	u32 ctrlmode = priv->can.ctrlmode;
-
-	if (ctrlmode & CAN_CTRLMODE_LOOPBACK)
-		flags |= USB_8DEV_LOOPBACK;
-	if (ctrlmode & CAN_CTRLMODE_LISTENONLY)
-		flags |= USB_8DEV_SILENT;
-	if (ctrlmode & CAN_CTRLMODE_ONE_SHOT)
-		flags |= USB_8DEV_DISABLE_AUTO_RESTRANS;
-
-	flags |= USB_8DEV_STATUS_FRAME;
+	u32 flags = USB_8DEV_STATUS_FRAME;
+	__be32 beflags;
+	__be16 bebrp;
 
 	memset(&outmsg, 0, sizeof(outmsg));
 	outmsg.command = USB_8DEV_OPEN;
@@ -288,6 +279,13 @@ static int usb_8dev_cmd_open(struct usb_8dev_priv *priv)
 	memcpy(&outmsg.data[3], &bebrp, sizeof(bebrp));
 
 	/* flags */
+	if (ctrlmode & CAN_CTRLMODE_LOOPBACK)
+		flags |= USB_8DEV_LOOPBACK;
+	if (ctrlmode & CAN_CTRLMODE_LISTENONLY)
+		flags |= USB_8DEV_SILENT;
+	if (ctrlmode & CAN_CTRLMODE_ONE_SHOT)
+		flags |= USB_8DEV_DISABLE_AUTO_RESTRANS;
+
 	beflags = cpu_to_be32(flags);
 	memcpy(&outmsg.data[5], &beflags, sizeof(beflags));
 
@@ -303,7 +301,7 @@ static int usb_8dev_cmd_close(struct usb_8dev_priv *priv)
 		.command = USB_8DEV_CLOSE,
 		.opt1 = 0,
 		.opt2 = 0
-		};
+	};
 
 	return usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 }
@@ -317,13 +315,13 @@ static int usb_8dev_cmd_version(struct usb_8dev_priv *priv, u32 *res)
 		.command = USB_8DEV_GET_SOFTW_HARDW_VER,
 		.opt1 = 0,
 		.opt2 = 0
-		};
+	};
 
 	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
 		return err;
 
-	*res = be32_to_cpup((u32 *)inmsg.data);
+	*res = be32_to_cpup((__be32 *)inmsg.data);
 
 	return err;
 }
@@ -347,7 +345,7 @@ static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 	if (err)
 		return -EIO;
 
-	result = be16_to_cpup((u16 *)inmsg.data);
+	result = be16_to_cpup((__be16 *)inmsg.data);
 
 	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
 }
@@ -365,13 +363,13 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 		.command = USB_8DEV_GET_HARDW_VER,
 		.opt1 = 0,
 		.opt2 = 0
-		};
+	};
 
 	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
 		return -EIO;
 
-	result = be16_to_cpup((u16 *)inmsg.data);
+	result = be16_to_cpup((__be16 *)inmsg.data);
 
 	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
 }
@@ -532,7 +530,10 @@ static void usb_8dev_rx_can_msg(struct usb_8dev_priv *priv,
 	struct sk_buff *skb;
 	struct net_device_stats *stats = &priv->netdev->stats;
 
-	if (msg->type == USB_8DEV_TYPE_CAN_FRAME) {
+	if (msg->type == USB_8DEV_TYPE_ERROR_FRAME &&
+		   msg->flags == USB_8DEV_ERR_FLAG) {
+		usb_8dev_rx_err_msg(priv, msg);
+	} else if (msg->type == USB_8DEV_TYPE_CAN_FRAME) {
 		skb = alloc_can_skb(priv->netdev, &cf);
 		if (!skb)
 			return;
@@ -552,9 +553,6 @@ static void usb_8dev_rx_can_msg(struct usb_8dev_priv *priv,
 
 		stats->rx_packets++;
 		stats->rx_bytes += cf->can_dlc;
-	} else if (msg->type == USB_8DEV_TYPE_ERROR_FRAME &&
-		   msg->flags == USB_8DEV_ERR_FLAG) {
-		usb_8dev_rx_err_msg(priv, msg);
 	} else {
 		netdev_warn(priv->netdev, "frame type %d unknown",
 			 msg->type);
