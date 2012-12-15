@@ -339,7 +339,7 @@ static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
 		.command = USB_8DEV_GET_SOFTW_VER,
 		.opt1 = 0,
 		.opt2 = 0
-		};
+	};
 
 	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
 	if (err)
@@ -458,7 +458,9 @@ static void usb_8dev_rx_err_msg(struct usb_8dev_priv *priv,
 		tx_errors = 1;
 		break;
 	case USB_8DEV_STATUSMSG_CRC:
-		cf->data[2] |= CAN_ERR_PROT_BIT;
+		cf->data[2] |= CAN_ERR_PROT_UNSPEC;
+		cf->data[3] |= CAN_ERR_PROT_LOC_CRC_SEQ |
+			       CAN_ERR_PROT_LOC_CRC_DEL;
 		rx_errors = 1;
 		break;
 	case USB_8DEV_STATUSMSG_BIT0:
@@ -490,7 +492,7 @@ static void usb_8dev_rx_err_msg(struct usb_8dev_priv *priv,
 		priv->can.can_stats.error_warning++;
 		break;
 	case USB_8DEV_STATUSMSG_BUSHEAVY:
-		priv->can.state = CAN_STATE_ERROR_WARNING;
+		priv->can.state = CAN_STATE_ERROR_PASSIVE;
 		cf->data[1] = (txerr > rxerr) ?
 			CAN_ERR_CRTL_TX_PASSIVE :
 			CAN_ERR_CRTL_RX_PASSIVE;
