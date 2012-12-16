@@ -326,57 +326,6 @@ static int usb_8dev_cmd_version(struct usb_8dev_priv *priv, u32 *res)
 	return err;
 }
 
-/* Get firmware version */
-static ssize_t show_firmware(struct device *d, struct device_attribute *attr,
-			     char *buf)
-{
-	struct usb_interface *intf = to_usb_interface(d);
-	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
-	u16 result;
-	struct usb_8dev_cmd_msg inmsg;
-	struct usb_8dev_cmd_msg outmsg = {
-		.channel = 0,
-		.command = USB_8DEV_GET_SOFTW_VER,
-		.opt1 = 0,
-		.opt2 = 0
-	};
-
-	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
-	if (err)
-		return -EIO;
-
-	result = be16_to_cpup((__be16 *)inmsg.data);
-
-	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
-}
-
-/* Get hardware version */
-static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
-			     char *buf)
-{
-	struct usb_interface *intf = to_usb_interface(d);
-	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
-	u16 result;
-	struct usb_8dev_cmd_msg inmsg;
-	struct usb_8dev_cmd_msg outmsg = {
-		.channel = 0,
-		.command = USB_8DEV_GET_HARDW_VER,
-		.opt1 = 0,
-		.opt2 = 0
-	};
-
-	int err = usb_8dev_send_cmd(priv, &outmsg, &inmsg);
-	if (err)
-		return -EIO;
-
-	result = be16_to_cpup((__be16 *)inmsg.data);
-
-	return sprintf(buf, "%d.%d\n", (u8)(result>>8), (u8)result);
-}
-
-static DEVICE_ATTR(firmware, S_IRUGO, show_firmware, NULL);
-static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
-
 /*
  * Set network device mode
  *
@@ -1041,14 +990,6 @@ static int usb_8dev_probe(struct usb_interface *intf,
 			 (version>>8) & 0xff, version & 0xff);
 	}
 
-	if (device_create_file(&intf->dev, &dev_attr_firmware))
-		netdev_err(netdev,
-			"Couldn't create device file for firmware\n");
-
-	if (device_create_file(&intf->dev, &dev_attr_hardware))
-		netdev_err(netdev,
-			"Couldn't create device file for hardware\n");
-
 	return 0;
 
 cleanup_cmd_msg_buffer:
@@ -1065,9 +1006,6 @@ cleanup_candev:
 static void usb_8dev_disconnect(struct usb_interface *intf)
 {
 	struct usb_8dev_priv *priv = usb_get_intfdata(intf);
-
-	device_remove_file(&intf->dev, &dev_attr_firmware);
-	device_remove_file(&intf->dev, &dev_attr_hardware);
 
 	usb_set_intfdata(intf, NULL);
 
