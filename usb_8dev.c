@@ -35,8 +35,8 @@
 #include <linux/can/error.h>
 
 /* driver constants */
-#define MAX_RX_URBS			10
-#define MAX_TX_URBS			10
+#define MAX_RX_URBS			20
+#define MAX_TX_URBS			20
 #define RX_BUFFER_SIZE			64
 
 /* vendor and product id */
@@ -115,7 +115,7 @@ enum usb_8dev_cmd {
 #define USB_8DEV_STATUSMSG_ACK		0x23  /* Ack Error */
 #define USB_8DEV_STATUSMSG_BIT0		0x24  /* Bit1 Error */
 #define USB_8DEV_STATUSMSG_BIT1		0x25  /* Bit0 Error */
-#define USB_8DEV_STATUSMSG_CRC		0x26  /* CRC Error */
+#define USB_8DEV_STATUSMSG_CRC		0x27  /* CRC Error */
 
 #define USB_8DEV_RP_MASK		0x7F  /* Mask for Receive Error Bit */
 
@@ -402,6 +402,9 @@ static void usb_8dev_rx_err_msg(struct usb_8dev_priv *priv,
 	}
 
 	switch (state) {
+	case USB_8DEV_STATUSMSG_OK:
+	case USB_8DEV_STATUSMSG_BUSOFF:
+		break;
 	case USB_8DEV_STATUSMSG_ACK:
 		cf->can_id |= CAN_ERR_ACK;
 		tx_errors = 1;
