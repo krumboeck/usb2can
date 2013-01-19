@@ -51,17 +51,8 @@ enum usb_8dev_endpoint {
 	USB_8DEV_ENDP_CMD_TX
 };
 
-/* bittiming constants */
+/* device CAN clock */
 #define USB_8DEV_ABP_CLOCK		32000000
-#define USB_8DEV_BAUD_MANUAL		0x09
-#define USB_8DEV_TSEG1_MIN		1
-#define USB_8DEV_TSEG1_MAX		16
-#define USB_8DEV_TSEG2_MIN		1
-#define USB_8DEV_TSEG2_MAX		8
-#define USB_8DEV_SJW_MAX		4
-#define USB_8DEV_BRP_MIN		1
-#define USB_8DEV_BRP_MAX		1024
-#define USB_8DEV_BRP_INC		1
 
 /* setup flags */
 #define USB_8DEV_SILENT			0x01
@@ -85,6 +76,8 @@ enum usb_8dev_cmd {
 	USB_8DEV_GET_SOFTW_HARDW_VER
 };
 
+/* command options */
+#define USB_8DEV_BAUD_MANUAL		0x09
 #define USB_8DEV_CMD_START		0x11
 #define USB_8DEV_CMD_END		0x22
 
@@ -896,14 +889,14 @@ static const struct net_device_ops usb_8dev_netdev_ops = {
 
 static struct can_bittiming_const usb_8dev_bittiming_const = {
 	.name = "usb_8dev",
-	.tseg1_min = USB_8DEV_TSEG1_MIN,
-	.tseg1_max = USB_8DEV_TSEG1_MAX,
-	.tseg2_min = USB_8DEV_TSEG2_MIN,
-	.tseg2_max = USB_8DEV_TSEG2_MAX,
-	.sjw_max = USB_8DEV_SJW_MAX,
-	.brp_min = USB_8DEV_BRP_MIN,
-	.brp_max = USB_8DEV_BRP_MAX,
-	.brp_inc = USB_8DEV_BRP_INC,
+	.tseg1_min = 1,
+	.tseg1_max = 16,
+	.tseg2_min = 1,
+	.tseg2_max = 8,
+	.sjw_max = 4,
+	.brp_min = 1,
+	.brp_max = 1024,
+	.brp_inc = 1,
 };
 
 /*
