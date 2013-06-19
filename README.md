@@ -3,7 +3,7 @@ CAN driver for UAB "8 devices" USB2CAN converter
 
 Note
 ----
-The "8 devices" USB2CAN converter is supported by main linux since version 3.9.
+The "8 devices" USB2CAN converter is supported by mainline linux since version 3.9.
 THIS SOFTWARE COMES WITHOUT ANY WARRANTY!
 
 
