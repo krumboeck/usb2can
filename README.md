@@ -15,6 +15,7 @@ GPL v2
 How to build
 ------------
 * Make sure you have kernel version >= 2.6.33 installed
+* For pre-3.3 kernels, check out the pre-3.3 branch
 * Install kernel header files and gcc
 * Simple type "make"
 
