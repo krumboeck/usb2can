@@ -18,6 +18,18 @@ How to build
 * Simple type "make"
 
 
+DKMS integration
+----------------
+* Install the dkms package for your distro
+* Check out the required branch from this repository
+* Do a git archive --prefix=usb2can-0.1/ -o /usr/src/usb2can-0.1.tar HEAD
+* Extract the archive in the /usr/src directory
+* Add the module, e.g. with dkms add -m usb2can -v 0.1 --verbose
+* Build the module, e.g. with dkms build -m usb2can -v 0.1 --verbose
+* Install the module, e.g. with dkms install -m usb2can -v 0.1 --verbose
+* You can also build packages for your distro, see man dkms
+
+
 Set up interface
 ----------------
     modprobe can_raw
