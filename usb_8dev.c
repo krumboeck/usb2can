@@ -1034,7 +1034,7 @@ static int __init usb_8dev_init(void)
 	/* register this driver with the USB subsystem */
 	result = usb_register(&usb_8dev_driver);
 	if (result)
-		err("usb_register failed. Error number %d", result);
+		printk(KERN_ERR "usb_register failed. Error number %d", result);
 
 	return result;
 }
