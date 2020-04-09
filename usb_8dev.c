@@ -521,7 +521,7 @@ static void usb_8dev_read_bulk_callback(struct urb *urb)
 
 	netdev = priv->netdev;
 
-	if (!netif_device_present(netdev))
+	if (!netif_device_present(netdev) || !netif_running(netdev))
 		return;
 
 	switch (urb->status) {
@@ -590,7 +590,7 @@ static void usb_8dev_write_bulk_callback(struct urb *urb)
 
 	atomic_dec(&priv->active_tx_urbs);
 
-	if (!netif_device_present(netdev))
+	if (!netif_device_present(netdev) || !netif_running(netdev))
 		return;
 
 	if (urb->status)
